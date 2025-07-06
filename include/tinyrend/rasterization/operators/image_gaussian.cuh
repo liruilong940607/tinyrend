@@ -318,11 +318,10 @@ struct ImageGaussianRasterizeKernelBackwardOperator
         );
 
         // reduce the gradient over the warp [faster than atomicAdd to global memory]
-        // TODO: warmSum support vec
         tinyrend::warp::warpSum(v_opacity, warp);
         tinyrend::warp::warpSum(v_mean, warp);
         tinyrend::warp::warpSum(v_conic, warp);
-        tinyrend::warp::warpSum<FEATURE_DIM>(v_feature, warp);
+        tinyrend::warp::warpSum(v_feature, warp);
 
         // first thread in the warp writes the gradient to global memory.
         if (warp.thread_rank() == 0) {
