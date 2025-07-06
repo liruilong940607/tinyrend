@@ -126,7 +126,7 @@ def test_rasterize_to_pixels(test_data, channels: int, batch_dims: Tuple[int, ..
     isect_prefix_sum[:-1] = isect_offsets[1:]
     isect_prefix_sum[-1] = flatten_ids.numel()
 
-    render_colors_, render_alphas_, _ = _C.image_gaussian_rasterize_forward(
+    render_colors_, render_alphas_, render_last_ids_ = _C.image_gaussian_rasterize_forward(
         opacities.reshape(-1).contiguous(),
         means2d.reshape(-1, 2).contiguous(),
         conics.reshape(-1, 3).contiguous(),
@@ -147,22 +147,37 @@ def test_rasterize_to_pixels(test_data, channels: int, batch_dims: Tuple[int, ..
     # v_render_colors = torch.randn_like(render_colors)
     # v_render_alphas = torch.randn_like(render_alphas)
 
-    # v_means2d, v_conics, v_colors, v_opacities, v_backgrounds = torch.autograd.grad(
+    # v_means2d, v_conics, v_colors, v_opacities = torch.autograd.grad(
     #     (render_colors * v_render_colors).sum()
     #     + (render_alphas * v_render_alphas).sum(),
-    #     (means2d, conics, colors, opacities, backgrounds),
+    #     (means2d, conics, colors, opacities),
     # )
-    # (
-    #     _v_means2d,
-    #     _v_conics,
-    #     _v_colors,
-    #     _v_opacities,
-    #     _v_backgrounds,
-    # ) = torch.autograd.grad(
-    #     (_render_colors * v_render_colors).sum()
-    #     + (_render_alphas * v_render_alphas).sum(),
-    #     (means2d, conics, colors, opacities, backgrounds),
+
+    # v_opacities_, v_means2d_, v_conics_, v_colors_ = _C.image_gaussian_rasterize_backward(
+    #     opacities.reshape(-1).contiguous(),
+    #     means2d.reshape(-1, 2).contiguous(),
+    #     conics.reshape(-1, 3).contiguous(),
+    #     colors.reshape(-1, channels).contiguous(),
+    #     I,
+    #     width,
+    #     height,
+    #     tile_size, # tile_width
+    #     tile_size, # tile_height
+    #     flatten_ids.reshape(-1).to(torch.uint32).contiguous(),   
+    #     isect_prefix_sum.reshape(-1).to(torch.uint32).contiguous(),
+    #     render_last_ids_.contiguous(),
+    #     render_alphas_.contiguous(),
+    #     v_render_alphas,
+    #     v_render_colors,
     # )
+    # torch.cuda.synchronize()
+
+    # torch.testing.assert_close(v_opacities, v_opacities_)
+    # torch.testing.assert_close(v_means2d, v_means2d_)
+    # torch.testing.assert_close(v_conics, v_conics_)
+    # torch.testing.assert_close(v_colors, v_colors_)
+
+
     # torch.testing.assert_close(v_means2d, _v_means2d, rtol=5e-3, atol=5e-3)
     # torch.testing.assert_close(v_conics, _v_conics, rtol=1e-3, atol=1e-3)
     # torch.testing.assert_close(v_colors, _v_colors, rtol=1e-3, atol=1e-3)

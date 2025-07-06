@@ -12,61 +12,6 @@ using namespace tinyrend;
 
 namespace cg = cooperative_groups;
 
-struct EvaluateLightAttenuationContext {
-    float alpha;
-    float vis;
-    fvec3 conic;
-    float dx;
-    float dy;
-    float maximum_alpha;
-};
-
-inline __device__ auto evaluate_light_attenuation_forward(
-    const float opacity,
-    const fvec2 mean,
-    const fvec3 conic,
-    const float pixel_x,
-    const float pixel_y,
-    const float maximum_alpha
-) -> std::pair<float, EvaluateLightAttenuationContext> {
-    // TODO(ruilong): do we really need to add 0.5f here?
-    auto const dx = pixel_x + 0.5f - mean[0];
-    auto const dy = pixel_y + 0.5f - mean[1];
-    auto const sigma =
-        0.5f * (conic[0] * dx * dx + conic[2] * dy * dy) + conic[1] * dx * dy;
-    auto const vis = __expf(-sigma);
-    auto const alpha = opacity * vis;
-    auto const output = min(alpha, maximum_alpha);
-    return {
-        output,
-        EvaluateLightAttenuationContext{alpha, vis, conic, dx, dy, maximum_alpha}
-    };
-}
-
-inline __device__ auto evaluate_light_attenuation_backward(
-    // context from forward pass
-    EvaluateLightAttenuationContext ctx,
-    // gradient of outputs
-    const float v_alpha,
-    // gradients of inputs
-    float &v_opacity,
-    fvec2 &v_mean,
-    fvec3 &v_conic
-) -> void {
-    if (ctx.alpha >= ctx.maximum_alpha) {
-        return; // clip happens so no gradient
-    }
-
-    auto const v_sigma = -ctx.alpha * v_alpha;
-    v_opacity += ctx.vis * v_alpha;
-    v_mean += v_sigma * fvec2{
-                            ctx.conic[0] * ctx.dx + ctx.conic[1] * ctx.dy,
-                            ctx.conic[1] * ctx.dx + ctx.conic[2] * ctx.dy
-                        };
-    v_conic += v_sigma *
-               fvec3{0.5f * ctx.dx * ctx.dx, ctx.dx * ctx.dy, 0.5f * ctx.dy * ctx.dy};
-}
-
 template <size_t FEATURE_DIM>
 struct ImageGaussianRasterizeKernelForwardOperator
     : tinyrend::rasterization::BaseRasterizeKernelOperator<
