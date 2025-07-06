@@ -66,7 +66,7 @@ fi
 
 for test in "${TEST_EXECUTABLES[@]}"; do
     # echo "Running $test"
-    "$test"
+    eval "$test"
     test_exit=$?
     if [ $test_exit -ne 0 ]; then
         exit_code=$test_exit
