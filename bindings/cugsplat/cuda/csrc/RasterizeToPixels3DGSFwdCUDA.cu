@@ -1,7 +1,7 @@
 #include <cooperative_groups.h>
 #include <cstdint>
 
-#include "RasterizeToPixels3DGSFwd.h"
+#include "RasterizeToPixels3DGS.h"
 #include "tinyrend/common/vec.h"
 #include "tinyrend/rasterization/base.cuh"
 #include "tinyrend/util/warp.cuh"
@@ -41,6 +41,30 @@ inline __device__ auto evaluate_light_attenuation_forward(
         output,
         EvaluateLightAttenuationContext{alpha, vis, conic, dx, dy, maximum_alpha}
     };
+}
+
+inline __device__ auto evaluate_light_attenuation_backward(
+    // context from forward pass
+    EvaluateLightAttenuationContext ctx,
+    // gradient of outputs
+    const float v_alpha,
+    // gradients of inputs
+    float &v_opacity,
+    fvec2 &v_mean,
+    fvec3 &v_conic
+) -> void {
+    if (ctx.alpha >= ctx.maximum_alpha) {
+        return; // clip happens so no gradient
+    }
+
+    auto const v_sigma = -ctx.alpha * v_alpha;
+    v_opacity += ctx.vis * v_alpha;
+    v_mean += v_sigma * fvec2{
+                            ctx.conic[0] * ctx.dx + ctx.conic[1] * ctx.dy,
+                            ctx.conic[1] * ctx.dx + ctx.conic[2] * ctx.dy
+                        };
+    v_conic += v_sigma *
+               fvec3{0.5f * ctx.dx * ctx.dx, ctx.dx * ctx.dy, 0.5f * ctx.dy * ctx.dy};
 }
 
 template <size_t FEATURE_DIM>
@@ -244,5 +268,6 @@ void image_gaussian_rasterize_kernel_forward(
     );
 
 __INS__(3)
+#undef __INS__
 
 } // namespace cugsplat

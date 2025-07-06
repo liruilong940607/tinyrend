@@ -7,7 +7,7 @@
 
 #include "Common.h"
 #include "Ops.h"
-#include "RasterizeToPixels3DGSFwd.h"
+#include "RasterizeToPixels3DGS.h"
 
 namespace cugsplat {
 
