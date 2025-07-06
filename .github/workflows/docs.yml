@@ -32,10 +32,7 @@ jobs:
 
       - name: Build documentation
         run: |
-          mkdir -p build
-          cd build
-          cmake .. -DBUILD_DOCS=ON -DBUILD_CPP_ONLY=ON
-          make docs
+          bash scripts/build.sh --docs --cpp-only
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3

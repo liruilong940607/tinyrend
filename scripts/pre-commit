@@ -4,7 +4,7 @@
 ROOT_DIR=$(git rev-parse --show-toplevel)
 
 # Run the formatter script
-bash "$ROOT_DIR/formatter.sh"
+bash "$ROOT_DIR/scripts/formatter.sh"
 
 # Get the list of changed files and only add those that exist
 changed_files=$(git diff --name-only --cached)

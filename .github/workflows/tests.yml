@@ -11,29 +11,10 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         submodules: recursive
 
-    - name: Create build directory
-      run: mkdir -p build
-
-    - name: Configure CMake
-      run: cmake -B build -S . -DBUILD_CPP_ONLY=ON -DBUILD_TESTS=ON
-
-    - name: Build
-      run: cmake --build build --config Release --parallel
-
     - name: Run tests
       run: |
-        # Run all test executables and collect their exit codes
-        exit_code=0
-        find ./build/tests -type f -executable | while read -r test; do
-          echo "Running $test"
-          "$test"
-          test_exit=$?
-          if [ $test_exit -ne 0 ]; then
-            exit_code=$test_exit
-          fi
-        done
-        exit $exit_code 
+        bash scripts/run_tests.sh --cpp-only
