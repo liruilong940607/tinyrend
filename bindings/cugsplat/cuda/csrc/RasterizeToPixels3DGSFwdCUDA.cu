@@ -1,11 +1,10 @@
 #include <cooperative_groups.h>
 #include <cstdint>
 
+#include "RasterizeToPixels3DGSFwd.h"
 #include "tinyrend/common/vec.h"
 #include "tinyrend/rasterization/base.cuh"
 #include "tinyrend/util/warp.cuh"
-
-#include "RasterizeToPixels3DGSFwd.h"
 
 namespace cugsplat {
 
@@ -52,21 +51,23 @@ struct ImageGaussianRasterizeKernelForwardOperator
     using FeatureType = fvec<FEATURE_DIM>;
 
     // Inputs
-    const float *__restrict__ opacity_ptr; // [N, 1]
-    const fvec2 *__restrict__ mean_ptr;    // [N, 2]
-    const fvec3 *__restrict__ conic_ptr;   // [N, 3]
-    const FeatureType
-        *__restrict__ feature_ptr; // [N, FEATURE_DIM] (e.g., 3 for RGB or 256 for neural features)
+    const float *__restrict__ opacity_ptr;       // [N, 1]
+    const fvec2 *__restrict__ mean_ptr;          // [N, 2]
+    const fvec3 *__restrict__ conic_ptr;         // [N, 3]
+    const FeatureType *__restrict__ feature_ptr; // [N, FEATURE_DIM] (e.g., 3 for RGB or
+                                                 // 256 for neural features)
 
     // Outputs
-    int32_t *__restrict__ render_last_index_ptr; // [n_images, image_height, image_width, 1]
-    float *__restrict__ render_alpha_ptr;        // [n_images, image_height, image_width, 1]
-    FeatureType
-        *__restrict__ render_feature_ptr; // [n_images, image_height, image_width, FEATURE_DIM]
+    int32_t
+        *__restrict__ render_last_index_ptr; // [n_images, image_height, image_width, 1]
+    float *__restrict__ render_alpha_ptr;    // [n_images, image_height, image_width, 1]
+    FeatureType *__restrict__ render_feature_ptr; // [n_images, image_height,
+                                                  // image_width, FEATURE_DIM]
 
     // Internal variables
-    FeatureType _expected_feature = FeatureType::zero(); // buffer for feature accumulation
-    float _T = 1.0f;                        // current transmittance
+    FeatureType _expected_feature =
+        FeatureType::zero();  // buffer for feature accumulation
+    float _T = 1.0f;          // current transmittance
     int32_t _last_index = -1; // the index of intersections ([n_isects]) for the last
                               // one being rasterized. -1 means no intersection.
 
@@ -162,9 +163,9 @@ template <size_t FEATURE_DIM>
 void image_gaussian_rasterize_kernel_forward(
     // Primitives
     const size_t n_primitives,
-    const float *__restrict__ opacity_ptr, // [n_primitives]
-    fvec2 *__restrict__ mean_ptr, // [n_primitives, 2]
-    fvec3 *__restrict__ conic_ptr, // [n_primitives, 3]
+    const float *__restrict__ opacity_ptr,       // [n_primitives]
+    fvec2 *__restrict__ mean_ptr,                // [n_primitives, 2]
+    fvec3 *__restrict__ conic_ptr,               // [n_primitives, 3]
     fvec<FEATURE_DIM> *__restrict__ feature_ptr, // [n_primitives, FEATURE_DIM]
 
     // Images
@@ -179,9 +180,11 @@ void image_gaussian_rasterize_kernel_forward(
     const uint32_t *__restrict__ isect_prefix_sum_per_tile, // [n_tiles]
 
     // Outputs
-    int32_t *__restrict__ render_last_index_ptr, // [n_images, image_height, image_width, 1]
-    float *__restrict__ render_alpha_ptr, // [n_images, image_height, image_width, 1]
-    fvec<FEATURE_DIM> *__restrict__ render_feature_ptr // [n_images, image_height, image_width, FEATURE_DIM]
+    int32_t
+        *__restrict__ render_last_index_ptr, // [n_images, image_height, image_width, 1]
+    float *__restrict__ render_alpha_ptr,    // [n_images, image_height, image_width, 1]
+    fvec<FEATURE_DIM> *__restrict__ render_feature_ptr // [n_images, image_height,
+                                                       // image_width, FEATURE_DIM]
 
 ) {
     ImageGaussianRasterizeKernelForwardOperator<FEATURE_DIM> op{};
@@ -193,12 +196,26 @@ void image_gaussian_rasterize_kernel_forward(
     op.render_alpha_ptr = render_alpha_ptr;
     op.render_feature_ptr = render_feature_ptr;
 
+    // Each block of threads cover a tile of the image. In total,
+    // there are n_tiles_x * n_tiles_y * n_images blocks.
     auto const n_tiles_x = (image_width + tile_width - 1) / tile_width;
     auto const n_tiles_y = (image_height + tile_height - 1) / tile_height;
 
     dim3 threads(tile_width, tile_height, 1);
     dim3 grid(n_tiles_x, n_tiles_y, n_images);
     size_t sm_size = decltype(op)::sm_size_per_primitive() * threads.x * threads.y;
+
+    if (cudaFuncSetAttribute(
+            tinyrend::rasterization::rasterize_kernel<decltype(op)>,
+            cudaFuncAttributeMaxDynamicSharedMemorySize,
+            sm_size
+        ) != cudaSuccess) {
+        throw std::runtime_error(
+            "Failed to set maximum shared memory size (requested " +
+            std::to_string(sm_size) + " bytes), try lowering tile_width or tile_height."
+        );
+    }
+
     tinyrend::rasterization::rasterize_kernel<<<grid, threads, sm_size>>>(
         op, image_height, image_width, isect_primitive_ids, isect_prefix_sum_per_tile
     );
@@ -207,18 +224,24 @@ void image_gaussian_rasterize_kernel_forward(
 // Explicit Instantiation: this should match how it is being called in .cpp
 // file.
 // TODO: this is slow to compile, can we do something about it?
-#define __INS__(DIM)                                                          \
-    template void image_gaussian_rasterize_kernel_forward<DIM>(                \
-        const size_t n_primitives, const float *__restrict__ opacity_ptr,      \
-        fvec2 *__restrict__ mean_ptr, fvec3 *__restrict__ conic_ptr,           \
-        fvec<DIM> *__restrict__ feature_ptr, const size_t n_images,            \
-        const size_t image_height, const size_t image_width,                    \
-        const size_t tile_width, const size_t tile_height,                      \
-        const uint32_t *__restrict__ isect_primitive_ids,                      \
-        const uint32_t *__restrict__ isect_prefix_sum_per_tile,                 \
-        int32_t *__restrict__ render_last_index_ptr,                            \
-        float *__restrict__ render_alpha_ptr,                                   \
-        fvec<DIM> *__restrict__ render_feature_ptr);
+#define __INS__(DIM)                                                                   \
+    template void image_gaussian_rasterize_kernel_forward<DIM>(                        \
+        const size_t n_primitives,                                                     \
+        const float *__restrict__ opacity_ptr,                                         \
+        fvec2 *__restrict__ mean_ptr,                                                  \
+        fvec3 *__restrict__ conic_ptr,                                                 \
+        fvec<DIM> *__restrict__ feature_ptr,                                           \
+        const size_t n_images,                                                         \
+        const size_t image_height,                                                     \
+        const size_t image_width,                                                      \
+        const size_t tile_width,                                                       \
+        const size_t tile_height,                                                      \
+        const uint32_t *__restrict__ isect_primitive_ids,                              \
+        const uint32_t *__restrict__ isect_prefix_sum_per_tile,                        \
+        int32_t *__restrict__ render_last_index_ptr,                                   \
+        float *__restrict__ render_alpha_ptr,                                          \
+        fvec<DIM> *__restrict__ render_feature_ptr                                     \
+    );
 
 __INS__(3)
 

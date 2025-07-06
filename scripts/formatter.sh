@@ -1,5 +1,5 @@
 # install via: sudo apt-get install clang-format
-find include/ tests/ \
+find include/ tests/ bindings/ \
   -type f \( -iname "*.cpp" -o -iname "*.cuh" -o -iname "*.cu" -o -iname "*.h" \) \
   -exec clang-format -i {} \;
 
