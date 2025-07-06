@@ -1,0 +1,26 @@
+#pragma once
+
+#include <ATen/core/Tensor.h>
+
+namespace cugsplat {
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor> image_gaussian_rasterize_forward(
+    // Primitives
+    const at::Tensor opacities,   // [n_primitives]
+    const at::Tensor means2d,     // [n_primitives, 2]
+    const at::Tensor conics,      // [n_primitives, 3]
+    const at::Tensor features,    // [n_primitives, channels]
+
+    // Images
+    const int64_t n_images,
+    const int64_t image_width,
+    const int64_t image_height,
+    const int64_t tile_width,
+    const int64_t tile_height,
+
+    // Intersections
+    const at::Tensor isect_primitive_ids,   // [n_isects]
+    const at::Tensor isect_prefix_sum_per_tile // [n_tiles]
+);
+
+} // namespace cugsplat
