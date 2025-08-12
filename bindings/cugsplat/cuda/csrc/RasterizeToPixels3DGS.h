@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include "tinyrend/common/macros.h"
+#include "tinyrend/common/scalar_grad.h"
 #include "tinyrend/common/vec.h"
 
 namespace cugsplat {
@@ -12,46 +13,56 @@ using namespace tinyrend;
 
 #ifdef __CUDA_ARCH__ // Shared between forward and backward cuda kernels
 
+template <typename ScalarType, typename Vec3Type>
 struct EvaluateLightAttenuationContext {
-    float alpha;
-    float vis;
-    fvec3 conic;
-    float dx;
-    float dy;
+    ScalarType alpha;
+    ScalarType vis;
+    Vec3Type conic;
+    ScalarType dx;
+    ScalarType dy;
     float maximum_alpha;
 };
 
+template <typename ScalarType, typename Vec2Type, typename Vec3Type>
 inline TREND_HOST_DEVICE auto evaluate_light_attenuation_forward(
-    const float opacity,
-    const fvec2 mean,
-    const fvec3 conic,
+    const ScalarType opacity,
+    const Vec2Type mean,
+    const Vec3Type conic,
     const float pixel_x,
     const float pixel_y,
     const float maximum_alpha
-) -> std::pair<float, EvaluateLightAttenuationContext> {
+) -> std::pair<ScalarType, EvaluateLightAttenuationContext<ScalarType, Vec3Type>> {
     // TODO(ruilong): do we really need to add 0.5f here?
     auto const dx = pixel_x + 0.5f - mean[0];
     auto const dy = pixel_y + 0.5f - mean[1];
     auto const sigma =
         0.5f * (conic[0] * dx * dx + conic[2] * dy * dy) + conic[1] * dx * dy;
-    auto const vis = __expf(-sigma); // Device code: use fast CUDA intrinsic
+    ScalarType vis;
+    if constexpr (std::is_same_v<ScalarType, float>) {
+        vis = __expf(-sigma); // Device code: use fast CUDA intrinsic
+    } else {
+        vis = exp(-sigma); // Use standard exp
+    }
     auto const alpha = opacity * vis;
-    auto const output = min(alpha, maximum_alpha);
+    auto const output = fmin(alpha, maximum_alpha);
     return {
         output,
-        EvaluateLightAttenuationContext{alpha, vis, conic, dx, dy, maximum_alpha}
+        EvaluateLightAttenuationContext<ScalarType, Vec3Type>{
+            alpha, vis, conic, dx, dy, maximum_alpha
+        }
     };
 }
 
+template <typename ScalarType, typename Vec2Type, typename Vec3Type>
 inline TREND_HOST_DEVICE auto evaluate_light_attenuation_backward(
     // context from forward pass
-    EvaluateLightAttenuationContext ctx,
+    EvaluateLightAttenuationContext<ScalarType, Vec3Type> ctx,
     // gradient of outputs
-    const float v_alpha,
+    const ScalarType v_alpha,
     // gradients of inputs
-    float &v_opacity,
-    fvec2 &v_mean,
-    fvec3 &v_conic
+    ScalarType &v_opacity,
+    Vec2Type &v_mean,
+    Vec3Type &v_conic
 ) -> void {
     if (ctx.alpha >= ctx.maximum_alpha) {
         return; // clip happens so no gradient
@@ -59,24 +70,26 @@ inline TREND_HOST_DEVICE auto evaluate_light_attenuation_backward(
 
     auto const v_sigma = -ctx.alpha * v_alpha;
     v_opacity += ctx.vis * v_alpha;
-    v_mean += v_sigma * fvec2{
+    v_mean += v_sigma * Vec2Type{
                             ctx.conic[0] * ctx.dx + ctx.conic[1] * ctx.dy,
                             ctx.conic[1] * ctx.dx + ctx.conic[2] * ctx.dy
                         };
-    v_conic += v_sigma *
-               fvec3{0.5f * ctx.dx * ctx.dx, ctx.dx * ctx.dy, 0.5f * ctx.dy * ctx.dy};
+    v_conic +=
+        v_sigma *
+        Vec3Type{0.5f * ctx.dx * ctx.dx, ctx.dx * ctx.dy, 0.5f * ctx.dy * ctx.dy};
 }
 
 #endif
 
-template <size_t FEATURE_DIM>
+template <size_t FEATURE_DIM, typename ScalarType, typename Vec2Type, typename Vec3Type>
 void image_gaussian_rasterize_kernel_forward(
     // Primitives
     const size_t n_primitives,
-    const float *__restrict__ opacity_ptr,       // [n_primitives]
-    fvec2 *__restrict__ mean_ptr,                // [n_primitives, 2]
-    fvec3 *__restrict__ conic_ptr,               // [n_primitives, 3]
-    fvec<FEATURE_DIM> *__restrict__ feature_ptr, // [n_primitives, FEATURE_DIM]
+    const ScalarType *__restrict__ opacity_ptr, // [n_primitives, 2]
+    const Vec2Type *__restrict__ mean_ptr,      // [n_primitives, 2, 2]
+    const Vec3Type *__restrict__ conic_ptr,     // [n_primitives, 3, 2]
+    const vec<ScalarType, FEATURE_DIM>
+        *__restrict__ feature_ptr, // [n_primitives, FEATURE_DIM, 2]
 
     // Images
     const size_t n_images,
@@ -92,9 +105,11 @@ void image_gaussian_rasterize_kernel_forward(
     // Outputs
     int32_t
         *__restrict__ render_last_index_ptr, // [n_images, image_height, image_width, 1]
-    float *__restrict__ render_alpha_ptr,    // [n_images, image_height, image_width, 1]
-    fvec<FEATURE_DIM> *__restrict__ render_feature_ptr // [n_images, image_height,
-                                                       // image_width, FEATURE_DIM]
+    ScalarType
+        *__restrict__ render_alpha_ptr, // [n_images, image_height, image_width, 1, 2]
+    vec<ScalarType, FEATURE_DIM>
+        *__restrict__ render_feature_ptr // [n_images, image_height,
+                                         // image_width, FEATURE_DIM, 2]
 );
 
 template <size_t FEATURE_DIM>

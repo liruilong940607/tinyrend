@@ -267,7 +267,7 @@ template <typename T, size_t N> struct alignas(T) vec {
     is_close(const vec<T, N> &other, T atol = 1e-5f, T rtol = 1e-5f) const {
 #pragma unroll
         for (size_t i = 0; i < N; ++i) {
-            if (std::abs(data[i] - other[i]) > atol + rtol * std::abs(other[i])) {
+            if (abs(data[i] - other[i]) > atol + rtol * abs(other[i])) {
                 return false;
             }
         }
@@ -321,7 +321,7 @@ inline TREND_HOST_DEVICE vec<T, N> cross(const vec<T, N> &v1, const vec<T, N> &v
 }
 
 template <typename T, size_t N> inline TREND_HOST_DEVICE T length(const vec<T, N> &v) {
-    return std::sqrt(dot(v, v));
+    return sqrt(dot(v, v));
 }
 
 template <typename T, size_t N> inline TREND_HOST_DEVICE T length2(const vec<T, N> &v) {
@@ -331,10 +331,10 @@ template <typename T, size_t N> inline TREND_HOST_DEVICE T length2(const vec<T, 
 template <typename T, size_t N>
 inline TREND_HOST_DEVICE T safe_length(const vec<T, N> &v) {
     // Find the maximum absolute value
-    T max_abs = std::fabs(v[0]);
+    T max_abs = abs(v[0]);
 #pragma unroll
     for (size_t i = 1; i < N; ++i) {
-        max_abs = std::fmax(max_abs, std::fabs(v[i]));
+        max_abs = fmax(max_abs, abs(v[i]));
     }
 
     if (max_abs <= T(0))
@@ -349,7 +349,7 @@ inline TREND_HOST_DEVICE T safe_length(const vec<T, N> &v) {
         sum_squares += ratio * ratio;
     }
 
-    return max_abs * std::sqrt(sum_squares);
+    return max_abs * sqrt(sum_squares);
 }
 
 template <typename T, size_t N>

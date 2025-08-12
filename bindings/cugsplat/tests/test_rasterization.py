@@ -17,8 +17,7 @@ import tqdm
 device = torch.device("cuda")
 
 
-@pytest.fixture
-def test_data():
+def create_test_data():
     torch.manual_seed(42)
 
     from gsplat._helper import load_test_data
@@ -46,6 +45,11 @@ def test_data():
         "width": width,
         "height": height,
     }
+    
+
+@pytest.fixture
+def test_data():
+    return create_test_data()
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device")
@@ -53,7 +57,8 @@ def test_data():
 # @pytest.mark.parametrize("batch_dims", [(), (2,), (1, 2)])
 @pytest.mark.parametrize("channels", [3])
 @pytest.mark.parametrize("batch_dims", [()])
-def test_rasterize_to_pixels(test_data, channels: int, batch_dims: Tuple[int, ...]):
+@pytest.mark.parametrize("benchmark", [False])
+def test_rasterize_to_pixels(test_data, channels: int, batch_dims: Tuple[int, ...], benchmark: bool):
     from gsplat.cuda._wrapper import (
         fully_fused_projection,
         isect_offset_encode,
@@ -126,22 +131,48 @@ def test_rasterize_to_pixels(test_data, channels: int, batch_dims: Tuple[int, ..
     isect_prefix_sum[:-1] = isect_offsets[1:]
     isect_prefix_sum[-1] = flatten_ids.numel()
 
-    render_colors_, render_alphas_, render_last_ids_ = _C.image_gaussian_rasterize_forward(
-        opacities.reshape(-1).contiguous(),
-        means2d.reshape(-1, 2).contiguous(),
-        conics.reshape(-1, 3).contiguous(),
-        colors.reshape(-1, channels).contiguous(),
-        I,
-        width,
-        height,
-        tile_size, # tile_width
-        tile_size, # tile_height
-        flatten_ids.reshape(-1).to(torch.uint32).contiguous(),   
-        isect_prefix_sum.reshape(-1).to(torch.uint32).contiguous(),
-    )
+    for _ in tqdm.trange(10000 if benchmark else 1, disable=not benchmark, desc="Forward"):
+        render_colors_, render_alphas_, render_last_ids_ = _C.image_gaussian_rasterize_forward(
+            opacities.reshape(-1).contiguous(),
+            means2d.reshape(-1, 2).contiguous(),
+            conics.reshape(-1, 3).contiguous(),
+            colors.reshape(-1, channels).contiguous(),
+            I,
+            width,
+            height,
+            tile_size, # tile_width
+            tile_size, # tile_height
+            flatten_ids.reshape(-1).to(torch.uint32).contiguous(),   
+            isect_prefix_sum.reshape(-1).to(torch.uint32).contiguous(),
+        )
 
     torch.testing.assert_close(render_colors, render_colors_)
     torch.testing.assert_close(render_alphas, render_alphas_)
+
+    # jvp
+    opacities_with_grad = torch.stack([opacities, torch.rand_like(opacities)], dim=-1)
+    means2d_with_grad = torch.stack([means2d, torch.rand_like(means2d)], dim=-1)
+    conics_with_grad = torch.stack([conics, torch.rand_like(conics)], dim=-1)
+    colors_with_grad = torch.stack([colors, torch.rand_like(colors)], dim=-1)
+    for _ in tqdm.trange(10000 if benchmark else 1, disable=not benchmark, desc="JVP"):
+        render_colors_, render_alphas_, render_last_ids_ = _C.image_gaussian_rasterize_jvp(
+            opacities_with_grad.reshape(-1, 2).contiguous(),
+            means2d_with_grad.reshape(-1, 2, 2).contiguous(),
+            conics_with_grad.reshape(-1, 3, 2).contiguous(),
+            colors_with_grad.reshape(-1, channels, 2).contiguous(),
+            I,
+            width,
+            height,
+            tile_size, # tile_width
+            tile_size, # tile_height
+            flatten_ids.reshape(-1).to(torch.uint32).contiguous(),   
+            isect_prefix_sum.reshape(-1).to(torch.uint32).contiguous(),
+        )
+    # render_colors_ shape: [n_images, image_height, image_width, channels, 2]
+    # render_alphas_ shape: [n_images, image_height, image_width, 1, 2]
+
+    torch.testing.assert_close(render_colors, render_colors_[..., 0])
+    torch.testing.assert_close(render_alphas, render_alphas_[..., 0])
 
     # # backward
     # v_render_colors = torch.randn_like(render_colors)
@@ -185,3 +216,6 @@ def test_rasterize_to_pixels(test_data, channels: int, batch_dims: Tuple[int, ..
     # torch.testing.assert_close(v_backgrounds, _v_backgrounds, rtol=1e-3, atol=1e-3)
 
 
+if __name__ == "__main__":
+    data = create_test_data()
+    test_rasterize_to_pixels(test_data=data, channels=3, batch_dims=(), benchmark=True)
