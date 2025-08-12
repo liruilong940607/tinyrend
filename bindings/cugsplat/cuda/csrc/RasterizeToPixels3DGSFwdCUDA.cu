@@ -2,6 +2,7 @@
 #include <cstdint>
 
 #include "RasterizeToPixels3DGS.h"
+#include "tinyrend/common/scalar_grad.h"
 #include "tinyrend/common/vec.h"
 #include "tinyrend/rasterization/base.cuh"
 #include "tinyrend/util/warp.cuh"
@@ -12,31 +13,35 @@ using namespace tinyrend;
 
 namespace cg = cooperative_groups;
 
-template <size_t FEATURE_DIM>
-struct ImageGaussianRasterizeKernelForwardOperator
+template <size_t FEATURE_DIM, typename ScalarType, typename Vec2Type, typename Vec3Type>
+struct ImageGaussianRasterizeKernelJvpOperator
     : tinyrend::rasterization::BaseRasterizeKernelOperator<
-          ImageGaussianRasterizeKernelForwardOperator<FEATURE_DIM>> {
+          ImageGaussianRasterizeKernelJvpOperator<
+              FEATURE_DIM,
+              ScalarType,
+              Vec2Type,
+              Vec3Type>> {
 
-    using FeatureType = fvec<FEATURE_DIM>;
-
+    using FeatureType = vec<ScalarType, FEATURE_DIM>;
     // Inputs
-    const float *__restrict__ opacity_ptr;       // [N, 1]
-    const fvec2 *__restrict__ mean_ptr;          // [N, 2]
-    const fvec3 *__restrict__ conic_ptr;         // [N, 3]
+    const ScalarType *__restrict__ opacity_ptr;  // [N, 1]
+    const Vec2Type *__restrict__ mean_ptr;       // [N, 2]
+    const Vec3Type *__restrict__ conic_ptr;      // [N, 3]
     const FeatureType *__restrict__ feature_ptr; // [N, FEATURE_DIM] (e.g., 3 for RGB or
                                                  // 256 for neural features)
 
     // Outputs
     int32_t
         *__restrict__ render_last_index_ptr; // [n_images, image_height, image_width, 1]
-    float *__restrict__ render_alpha_ptr;    // [n_images, image_height, image_width, 1]
+    ScalarType
+        *__restrict__ render_alpha_ptr; // [n_images, image_height, image_width, 1]
     FeatureType *__restrict__ render_feature_ptr; // [n_images, image_height,
                                                   // image_width, FEATURE_DIM]
 
     // Internal variables
     FeatureType _expected_feature =
-        FeatureType::zero();  // buffer for feature accumulation
-    float _T = 1.0f;          // current transmittance
+        FeatureType::zero();          // buffer for feature accumulation
+    ScalarType _T = ScalarType(1.0f); // current transmittance
     int32_t _last_index = -1; // the index of intersections ([n_isects]) for the last
                               // one being rasterized. -1 means no intersection.
 
@@ -48,18 +53,19 @@ struct ImageGaussianRasterizeKernelForwardOperator
 
     static inline __host__ auto sm_size_per_primitive_impl() -> uint32_t {
         // cache the opacity, mean, conic, and primitive_id
-        return sizeof(float) + sizeof(fvec2) + sizeof(fvec3) + sizeof(uint32_t);
+        return sizeof(ScalarType) + sizeof(Vec2Type) + sizeof(Vec3Type) +
+               sizeof(uint32_t);
     }
 
     inline __device__ auto initialize_impl() -> bool { return true; }
 
     inline __device__ auto primitive_preprocess_impl(uint32_t primitive_id) -> void {
         // cache data to shared memory
-        auto const sm_opacity_ptr = reinterpret_cast<float *>(this->sm_ptr);
+        auto const sm_opacity_ptr = reinterpret_cast<ScalarType *>(this->sm_ptr);
         auto const sm_mean_ptr =
-            reinterpret_cast<fvec2 *>(&sm_opacity_ptr[this->n_threads_per_block]);
+            reinterpret_cast<Vec2Type *>(&sm_opacity_ptr[this->n_threads_per_block]);
         auto const sm_conic_ptr =
-            reinterpret_cast<fvec3 *>(&sm_mean_ptr[this->n_threads_per_block]);
+            reinterpret_cast<Vec3Type *>(&sm_mean_ptr[this->n_threads_per_block]);
         auto const sm_primitive_id_ptr =
             reinterpret_cast<uint32_t *>(&sm_conic_ptr[this->n_threads_per_block]);
         sm_opacity_ptr[this->thread_rank] = this->opacity_ptr[primitive_id];
@@ -72,11 +78,11 @@ struct ImageGaussianRasterizeKernelForwardOperator
     inline __device__ auto
     rasterize_impl(uint32_t batch_start, uint32_t t, WarpT &warp) -> bool {
         // load data from shared memory
-        auto const sm_opacity_ptr = reinterpret_cast<float *>(this->sm_ptr);
+        auto const sm_opacity_ptr = reinterpret_cast<ScalarType *>(this->sm_ptr);
         auto const sm_mean_ptr =
-            reinterpret_cast<fvec2 *>(&sm_opacity_ptr[this->n_threads_per_block]);
+            reinterpret_cast<Vec2Type *>(&sm_opacity_ptr[this->n_threads_per_block]);
         auto const sm_conic_ptr =
-            reinterpret_cast<fvec3 *>(&sm_mean_ptr[this->n_threads_per_block]);
+            reinterpret_cast<Vec3Type *>(&sm_mean_ptr[this->n_threads_per_block]);
         auto const sm_primitive_id_ptr =
             reinterpret_cast<uint32_t *>(&sm_conic_ptr[this->n_threads_per_block]);
         auto const opacity = sm_opacity_ptr[t];
@@ -128,14 +134,15 @@ struct ImageGaussianRasterizeKernelForwardOperator
     }
 };
 
-template <size_t FEATURE_DIM>
+template <size_t FEATURE_DIM, typename ScalarType, typename Vec2Type, typename Vec3Type>
 void image_gaussian_rasterize_kernel_forward(
     // Primitives
     const size_t n_primitives,
-    const float *__restrict__ opacity_ptr,       // [n_primitives]
-    fvec2 *__restrict__ mean_ptr,                // [n_primitives, 2]
-    fvec3 *__restrict__ conic_ptr,               // [n_primitives, 3]
-    fvec<FEATURE_DIM> *__restrict__ feature_ptr, // [n_primitives, FEATURE_DIM]
+    const ScalarType *__restrict__ opacity_ptr, // [n_primitives]
+    const Vec2Type *__restrict__ mean_ptr,      // [n_primitives, 2]
+    const Vec3Type *__restrict__ conic_ptr,     // [n_primitives, 3]
+    const vec<ScalarType, FEATURE_DIM>
+        *__restrict__ feature_ptr, // [n_primitives, FEATURE_DIM]
 
     // Images
     const size_t n_images,
@@ -151,12 +158,15 @@ void image_gaussian_rasterize_kernel_forward(
     // Outputs
     int32_t
         *__restrict__ render_last_index_ptr, // [n_images, image_height, image_width, 1]
-    float *__restrict__ render_alpha_ptr,    // [n_images, image_height, image_width, 1]
-    fvec<FEATURE_DIM> *__restrict__ render_feature_ptr // [n_images, image_height,
-                                                       // image_width, FEATURE_DIM]
+    ScalarType
+        *__restrict__ render_alpha_ptr, // [n_images, image_height, image_width, 1]
+    vec<ScalarType, FEATURE_DIM>
+        *__restrict__ render_feature_ptr // [n_images, image_height,
+                                         // image_width, FEATURE_DIM]
 
 ) {
-    ImageGaussianRasterizeKernelForwardOperator<FEATURE_DIM> op{};
+    ImageGaussianRasterizeKernelJvpOperator<FEATURE_DIM, ScalarType, Vec2Type, Vec3Type>
+        op{};
     op.opacity_ptr = opacity_ptr;
     op.mean_ptr = mean_ptr;
     op.conic_ptr = conic_ptr;
@@ -193,13 +203,14 @@ void image_gaussian_rasterize_kernel_forward(
 // Explicit Instantiation: this should match how it is being called in .cpp
 // file.
 // TODO: this is slow to compile, can we do something about it?
-#define __INS__(DIM)                                                                   \
-    template void image_gaussian_rasterize_kernel_forward<DIM>(                        \
+#define __INS__(DIM, ScalarType, Vec2Type, Vec3Type)                                   \
+    template void                                                                      \
+    image_gaussian_rasterize_kernel_forward<DIM, ScalarType, Vec2Type, Vec3Type>(      \
         const size_t n_primitives,                                                     \
-        const float *__restrict__ opacity_ptr,                                         \
-        fvec2 *__restrict__ mean_ptr,                                                  \
-        fvec3 *__restrict__ conic_ptr,                                                 \
-        fvec<DIM> *__restrict__ feature_ptr,                                           \
+        const ScalarType *__restrict__ opacity_ptr,                                    \
+        const Vec2Type *__restrict__ mean_ptr,                                         \
+        const Vec3Type *__restrict__ conic_ptr,                                        \
+        const vec<ScalarType, DIM> *__restrict__ feature_ptr,                          \
         const size_t n_images,                                                         \
         const size_t image_height,                                                     \
         const size_t image_width,                                                      \
@@ -208,11 +219,19 @@ void image_gaussian_rasterize_kernel_forward(
         const uint32_t *__restrict__ isect_primitive_ids,                              \
         const uint32_t *__restrict__ isect_prefix_sum_per_tile,                        \
         int32_t *__restrict__ render_last_index_ptr,                                   \
-        float *__restrict__ render_alpha_ptr,                                          \
-        fvec<DIM> *__restrict__ render_feature_ptr                                     \
+        ScalarType *__restrict__ render_alpha_ptr,                                     \
+        vec<ScalarType, DIM> *__restrict__ render_feature_ptr                          \
     );
 
-__INS__(3)
+// Forward without grads
+__INS__(3, float, fvec2, fvec3)
+
+// JVP: Forward with grads
+using JVP_ScalarType = scalar_grad<float>;
+using JVP_Vec2Type = vec<scalar_grad<float>, 2>;
+using JVP_Vec3Type = vec<scalar_grad<float>, 3>;
+__INS__(3, JVP_ScalarType, JVP_Vec2Type, JVP_Vec3Type)
+
 #undef __INS__
 
 } // namespace cugsplat
