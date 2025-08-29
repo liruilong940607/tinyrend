@@ -111,6 +111,10 @@ class _RasterizeToPixels(torch.autograd.Function):
         v_render_colors: Tensor,  # [..., H, W, 3]
         v_render_alphas: Tensor,  # [..., H, W, 1]
     ):
+        # make tensors contiguous
+        v_render_colors = v_render_colors.contiguous()
+        v_render_alphas = v_render_alphas.contiguous()
+
         (
             # Primitives
             opacities,
@@ -124,52 +128,44 @@ class _RasterizeToPixels(torch.autograd.Function):
             render_alphas,
             last_ids,
         ) = ctx.saved_tensors
+        n_images = ctx.n_images
         width = ctx.width
         height = ctx.height
         tile_size = ctx.tile_size
 
-        raise NotImplementedError("Not implemented")
-
-        # (
-        #     v_means2d_abs,
-        #     v_means2d,
-        #     v_conics,
-        #     v_colors,
-        #     v_opacities,
-        # ) = _make_lazy_cuda_func("rasterize_to_pixels_3dgs_bwd")(
-        #     means2d,
-        #     conics,
-        #     colors,
-        #     opacities,
-        #     backgrounds,
-        #     masks,
-        #     width,
-        #     height,
-        #     tile_size,
-        #     isect_offsets,
-        #     flatten_ids,
-        #     render_alphas,
-        #     last_ids,
-        #     v_render_colors.contiguous(),
-        #     v_render_alphas.contiguous(),
-        #     absgrad,
-        # )
-
-        # if absgrad:
-        #     means2d.absgrad = v_means2d_abs
-
-        # if ctx.needs_input_grad[4]:
-        #     v_backgrounds = (v_render_colors * (1.0 - render_alphas).float()).sum(
-        #         dim=(-3, -2)
-        #     )
-        # else:
-        #     v_backgrounds = None
+        (
+            v_opacities,
+            v_means2d,
+            v_conics,
+            v_colors,
+        ) = _make_lazy_cuda_func("image_gaussian_rasterize_backward")(
+            # Primitives
+            opacities,
+            means2d,
+            conics,
+            colors,
+            # Images
+            n_images,
+            width, # image_width
+            height, # image_height
+            tile_size, # tile_width
+            tile_size, # tile_height
+            # Intersections
+            isect_primitive_ids,
+            isect_prefix_sum_per_tile,
+            # Forward Outputs
+            last_ids, # render_last_ids
+            render_alphas,
+            # Gradients for forward output
+            v_render_alphas,
+            v_render_colors,
+        )
 
         return (
-            None, # v_means2d
-            None, # v_conics
-            None, # v_colors
-            None, # v_opacities
+            v_means2d, # v_means2d
+            v_conics, # v_conics
+            v_colors, # v_colors
+            v_opacities, # v_opacities
             None,
             None,
             None,

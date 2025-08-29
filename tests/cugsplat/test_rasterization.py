@@ -158,7 +158,24 @@ def test_rasterize_to_pixels(rasterizer_test_data: dict):
     torch.testing.assert_close(render_colors, render_colors_)
     torch.testing.assert_close(render_alphas, render_alphas_)
 
-    
+    # backward
+    v_render_colors = torch.rand_like(render_colors)
+    v_render_alphas = torch.rand_like(render_alphas)
+
+    v_means2d, v_conics, v_colors, v_opacities = torch.autograd.grad(
+        (render_colors * v_render_colors).sum()
+        + (render_alphas * v_render_alphas).sum(),
+        (means2d, conics, colors, opacities),
+    )
+    # v_means2d_, v_conics_, v_colors_, v_opacities_ = torch.autograd.grad(
+    #     (render_colors_ * v_render_colors).sum()
+    #     + (render_alphas_ * v_render_alphas).sum(),
+    #     (means2d, conics, colors, opacities),
+    # )
+    # torch.testing.assert_close(v_means2d, v_means2d_)
+    # torch.testing.assert_close(v_conics, v_conics_)
+    # torch.testing.assert_close(v_colors, v_colors_)
+    # torch.testing.assert_close(v_opacities, v_opacities_)
 
 
 # @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device")
