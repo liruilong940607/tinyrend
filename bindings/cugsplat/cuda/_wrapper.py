@@ -104,9 +104,6 @@ class _RasterizeToPixels(torch.autograd.Function):
             # Intersections
             isect_primitive_ids,
             isect_prefix_sum_per_tile,
-            # Forward Outputs
-            render_alphas,
-            last_ids,
         )
 
         ctx.save_for_backward(
@@ -216,9 +213,6 @@ class _RasterizeToPixels(torch.autograd.Function):
             # Intersections
             isect_primitive_ids,
             isect_prefix_sum_per_tile,
-            # Forward Outputs
-            render_alphas,
-            last_ids,
         ) = ctx.saved_tensors
         n_images = ctx.n_images
         width = ctx.width
