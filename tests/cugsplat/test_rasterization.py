@@ -1,12 +1,10 @@
 import os
 import sys
 import pytest
-import torch
-from typing import Tuple
-
 import math
-import imageio
-import numpy as np
+
+import torch
+
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BINDINGS_DIR = os.path.join(CURRENT_DIR, "..", "..", "bindings")
