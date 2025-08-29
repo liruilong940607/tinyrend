@@ -46,9 +46,13 @@ class _RasterizeToPixels(torch.autograd.Function):
         assert flatten_ids.ndim == 1, f"Got {flatten_ids.ndim=}"
 
         n_images, n_tiles_y, n_tiles_x = isect_offsets.shape
-        assert math.ceil(width / float(tile_size)) == n_tiles_x, f"Got {width=}, {tile_size=}, {n_tiles_x=}"
-        assert math.ceil(height / float(tile_size)) == n_tiles_y, f"Got {height=}, {tile_size=}, {n_tiles_y=}"
-        
+        assert (
+            math.ceil(width / float(tile_size)) == n_tiles_x
+        ), f"Got {width=}, {tile_size=}, {n_tiles_x=}"
+        assert (
+            math.ceil(height / float(tile_size)) == n_tiles_y
+        ), f"Got {height=}, {tile_size=}, {n_tiles_y=}"
+
         # make sure tensors are contiguous
         opacities = opacities.contiguous()
         means2d = means2d.contiguous()
@@ -58,13 +62,15 @@ class _RasterizeToPixels(torch.autograd.Function):
         isect_primitive_ids = flatten_ids.to(torch.uint32).contiguous()
 
         # Note: new API requires inclusive sum (i.e. prefix sum) while in old gsplat API
-        # the `isect_offsets` stores exclusive sum. So we convert it here. 
+        # the `isect_offsets` stores exclusive sum. So we convert it here.
         # TODO: update the intersection API to produce inclusive sum.
         isect_offsets = isect_offsets.reshape(-1)
         isect_prefix_sum_per_tile = torch.empty_like(isect_offsets)
         isect_prefix_sum_per_tile[:-1] = isect_offsets[1:]
         isect_prefix_sum_per_tile[-1] = isect_primitive_ids.numel()
-        isect_prefix_sum_per_tile = isect_prefix_sum_per_tile.to(torch.uint32).contiguous()
+        isect_prefix_sum_per_tile = isect_prefix_sum_per_tile.to(
+            torch.uint32
+        ).contiguous()
 
         render_colors, render_alphas, last_ids = _make_lazy_cuda_func(
             "image_gaussian_rasterize_forward"
@@ -76,10 +82,10 @@ class _RasterizeToPixels(torch.autograd.Function):
             colors,
             # Images
             n_images,
-            width, # image_width
-            height, # image_height
-            tile_size, # tile_width
-            tile_size, # tile_height
+            width,  # image_width
+            height,  # image_height
+            tile_size,  # tile_width
+            tile_size,  # tile_height
             # Intersections
             isect_primitive_ids,
             isect_prefix_sum_per_tile,
@@ -133,12 +139,9 @@ class _RasterizeToPixels(torch.autograd.Function):
         height = ctx.height
         tile_size = ctx.tile_size
 
-        (
-            v_opacities,
-            v_means2d,
-            v_conics,
-            v_colors,
-        ) = _make_lazy_cuda_func("image_gaussian_rasterize_backward")(
+        (v_opacities, v_means2d, v_conics, v_colors,) = _make_lazy_cuda_func(
+            "image_gaussian_rasterize_backward"
+        )(
             # Primitives
             opacities,
             means2d,
@@ -146,15 +149,15 @@ class _RasterizeToPixels(torch.autograd.Function):
             colors,
             # Images
             n_images,
-            width, # image_width
-            height, # image_height
-            tile_size, # tile_width
-            tile_size, # tile_height
+            width,  # image_width
+            height,  # image_height
+            tile_size,  # tile_width
+            tile_size,  # tile_height
             # Intersections
             isect_primitive_ids,
             isect_prefix_sum_per_tile,
             # Forward Outputs
-            last_ids, # render_last_ids
+            last_ids,  # render_last_ids
             render_alphas,
             # Gradients for forward output
             v_render_alphas,
@@ -162,10 +165,10 @@ class _RasterizeToPixels(torch.autograd.Function):
         )
 
         return (
-            v_means2d, # v_means2d
-            v_conics, # v_conics
-            v_colors, # v_colors
-            v_opacities, # v_opacities
+            v_means2d,  # v_means2d
+            v_conics,  # v_conics
+            v_colors,  # v_colors
+            v_opacities,  # v_opacities
             None,
             None,
             None,

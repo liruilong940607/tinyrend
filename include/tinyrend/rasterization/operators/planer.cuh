@@ -42,8 +42,13 @@ struct PlanerRasterizeKernelForwardOperator
     }
 
     template <class WarpT>
-    inline __device__ auto
-    rasterize_impl(uint32_t batch_start, uint32_t t, WarpT &warp) -> bool {
+    inline __device__ auto rasterize_impl(
+        uint32_t batch_start, uint32_t t, WarpT &warp, bool &terminated
+    ) -> bool {
+        if (terminated) {
+            return true;
+        }
+
         // load data from shared memory
         auto const sm_opacity_ptr = reinterpret_cast<float *>(this->sm_ptr);
         auto const alpha = sm_opacity_ptr[t];
@@ -148,31 +153,49 @@ struct PlanerRasterizeKernelBackwardOperator
     }
 
     template <class WarpT>
-    inline __device__ auto
-    rasterize_impl(uint32_t batch_start, uint32_t t, WarpT &warp) -> bool {
-        // load data from shared memory
+    inline __device__ auto rasterize_impl(
+        uint32_t batch_start, uint32_t t, WarpT &warp, bool &terminated
+    ) -> bool {
+        // Flag to indicate if this primitive is rendered to this pixel. If not we will
+        // skip the gradient computation. Note: we do not do early return like we do in
+        // forward pass because we need to call warpSum later so the thread needs to be
+        // alive.
+        auto maybe_rendered = true;
+
+        if (terminated) {
+            maybe_rendered = false;
+        }
+
         auto const sm_opacity_ptr = reinterpret_cast<float *>(this->sm_ptr);
         auto const sm_primitive_id_ptr =
             reinterpret_cast<uint32_t *>(&sm_opacity_ptr[this->n_threads_per_block]);
-        auto const alpha = sm_opacity_ptr[t];
-        auto const primitive_id = sm_primitive_id_ptr[t];
 
-        // compute the gradient
-        auto const ra = 1.0f / (1.0f - alpha);
-        this->_T *= ra;
-        auto v_alpha = this->_T_final * ra * this->_v_render_alpha;
+        auto v_alpha = 0.0f;
+        if (maybe_rendered) {
+            // load data from shared memory
+            auto const alpha = sm_opacity_ptr[t];
+
+            // compute the gradient
+            auto const ra = 1.0f / (1.0f - alpha);
+            this->_T *= ra;
+            v_alpha = this->_T_final * ra * this->_v_render_alpha;
+        }
 
         // reduce the gradient over the warp [faster than atomicAdd to global memory]
         tinyrend::warp::warpSum(v_alpha, warp);
 
         // first thread in the warp writes the gradient to global memory.
         if (warp.thread_rank() == 0) {
+            auto const primitive_id = sm_primitive_id_ptr[t];
+
             float *v_opacity_ptr = (float *)this->v_opacity_ptr;
             atomicAdd(v_opacity_ptr + primitive_id, v_alpha);
         }
 
         // Return whether we want to terminate the rasterization process.
-        return false;
+        // In backward pass we don't do early return so we maintain the `terminated`
+        // flag.
+        return terminated;
     }
 
     inline __device__ auto pixel_postprocess_impl() -> void {

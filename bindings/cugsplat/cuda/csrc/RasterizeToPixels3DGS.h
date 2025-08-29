@@ -33,8 +33,8 @@ inline TREND_HOST_DEVICE auto evaluate_light_attenuation_forward(
     const float maximum_alpha
 ) -> std::pair<ScalarType, EvaluateLightAttenuationContext<ScalarType, Vec3Type>> {
     // TODO(ruilong): do we really need to add 0.5f here?
-    auto const dx = pixel_x + 0.5f - mean[0];
-    auto const dy = pixel_y + 0.5f - mean[1];
+    auto const dx = mean[0] - (pixel_x + 0.5f);
+    auto const dy = mean[1] - (pixel_y + 0.5f);
     auto const sigma =
         0.5f * (conic[0] * dx * dx + conic[2] * dy * dy) + conic[1] * dx * dy;
     ScalarType vis;

@@ -47,8 +47,10 @@ template <typename Derived> struct BaseRasterizeKernelOperator {
 
     template <class WarpT>
     inline __device__ auto
-    rasterize(uint32_t batch_start, uint32_t t, WarpT &warp) -> bool {
-        return static_cast<Derived *>(this)->rasterize_impl(batch_start, t, warp);
+    rasterize(uint32_t batch_start, uint32_t t, WarpT &warp, bool &terminated) -> bool {
+        return static_cast<Derived *>(this)->rasterize_impl(
+            batch_start, t, warp, terminated
+        );
     }
 
     inline __device__ auto pixel_postprocess() -> void {
@@ -169,7 +171,7 @@ __global__ void rasterize_kernel(
     // Check if the pixel is inside the image. If not, we still keep this thread
     // alive to help with preprocessing primitives.
     auto const inside = pixel_x < image_width && pixel_y < image_height;
-    auto done = !(inside && init_success);
+    auto terminated = !(inside && init_success);
 
     // First, figure out which primitives intersect with the current tile.
     // If reverse_order is true, we scan the primitives from end -> start.
@@ -188,8 +190,11 @@ __global__ void rasterize_kernel(
          reverse_order ? b >= 0 : b < n_batches;
          reverse_order ? --b : ++b) {
         // resync all threads before beginning next batch and early stop if entire
-        // tile is done
-        if (__syncthreads_count(done) >= n_threads_per_block) {
+        // tile is terminated.
+        // reverse order is for backward pass, where we will likely do
+        // warp level sync, so we don't do early stop when in reverse order.
+        if ((__syncthreads_count(terminated) >= n_threads_per_block) &&
+            !reverse_order) {
             break;
         }
 
@@ -210,11 +215,12 @@ __global__ void rasterize_kernel(
         for (int32_t t = reverse_order ? batch_size - 1 : 0;
              reverse_order ? t >= 0 : t < batch_size;
              reverse_order ? --t : ++t) {
-            if (done)
+            // reverse order is for backward pass, where we will likely do
+            // warp level sync, so we don't do early stop when in reverse order.
+            if (terminated && !reverse_order)
                 break;
             // `t` is the local index of the primitive in the batch.
-            bool terminate = op.rasterize(batch_start, t, warp);
-            done = done || terminate;
+            terminated = op.rasterize(batch_start, t, warp, terminated);
         }
     }
 

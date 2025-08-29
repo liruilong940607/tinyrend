@@ -4,4 +4,4 @@ find include/ tests/ bindings/ \
   -exec clang-format -i {} \;
 
 # install via: pip install black==22.3.0
-# black . tinyrend/ tests/ examples/ profiling/
+black bindings/ tests/

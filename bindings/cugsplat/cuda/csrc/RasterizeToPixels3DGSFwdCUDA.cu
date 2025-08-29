@@ -75,8 +75,15 @@ struct ImageGaussianRasterizeKernelJvpOperator
     }
 
     template <class WarpT>
-    inline __device__ auto
-    rasterize_impl(uint32_t batch_start, uint32_t t, WarpT &warp) -> bool {
+    inline __device__ auto rasterize_impl(
+        uint32_t batch_start, uint32_t t, WarpT &warp, bool &terminated
+    ) -> bool {
+        if (terminated) {
+            // if we know it's terminated, we don't need to do anything, just return
+            // true, which will maintain the `terminated` flag.
+            return true;
+        }
+
         // load data from shared memory
         auto const sm_opacity_ptr = reinterpret_cast<ScalarType *>(this->sm_ptr);
         auto const sm_mean_ptr =

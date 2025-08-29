@@ -21,6 +21,7 @@ def create_test_data():
     torch.manual_seed(42)
 
     from gsplat._helper import load_test_data
+
     (
         means,
         quats,
@@ -33,7 +34,9 @@ def create_test_data():
         height,
     ) = load_test_data(
         device=device,
-        data_path=os.path.join(os.path.dirname(__file__), "../../assets/test_garden.npz"),
+        data_path=os.path.join(
+            os.path.dirname(__file__), "../../assets/test_garden.npz"
+        ),
     )
     return {
         "means": means,  # [N, 3]
@@ -46,6 +49,7 @@ def create_test_data():
         "height": height,
     }
 
+
 def create_rasterizer_test_data():
     test_data = create_test_data()
     from gsplat.cuda._wrapper import (
@@ -54,18 +58,18 @@ def create_rasterizer_test_data():
         isect_tiles,
         quat_scale_to_covar_preci,
     )
-    
-    N = test_data["means"].shape[0]
+
+    N = test_data["means"][::10].shape[0]
     C = test_data["viewmats"].shape[0]
 
     Ks = test_data["Ks"]
     viewmats = test_data["viewmats"]
     height = test_data["height"]
     width = test_data["width"]
-    quats = test_data["quats"]
-    scales = test_data["scales"]
-    means = test_data["means"]
-    opacities = test_data["opacities"]
+    quats = test_data["quats"][::10]
+    scales = test_data["scales"][::10]
+    means = test_data["means"][::10]
+    opacities = test_data["opacities"][::10]
     colors = torch.rand(C, N, 3, device=device)
     backgrounds = torch.zeros((C, 3), device=device)
 
@@ -104,6 +108,7 @@ def create_rasterizer_test_data():
 def test_data():
     return create_test_data()
 
+
 @pytest.fixture
 def rasterizer_test_data():
     return create_rasterizer_test_data()
@@ -123,6 +128,8 @@ def test_rasterize_to_pixels(rasterizer_test_data: dict):
     isect_offsets = rasterizer_test_data["isect_offsets"]
     flatten_ids = rasterizer_test_data["flatten_ids"]
     backgrounds = rasterizer_test_data["backgrounds"]
+
+    print("width: %d, height: %d" % (width, height))
 
     means2d.requires_grad = True
     conics.requires_grad = True
@@ -167,15 +174,15 @@ def test_rasterize_to_pixels(rasterizer_test_data: dict):
         + (render_alphas * v_render_alphas).sum(),
         (means2d, conics, colors, opacities),
     )
-    # v_means2d_, v_conics_, v_colors_, v_opacities_ = torch.autograd.grad(
-    #     (render_colors_ * v_render_colors).sum()
-    #     + (render_alphas_ * v_render_alphas).sum(),
-    #     (means2d, conics, colors, opacities),
-    # )
-    # torch.testing.assert_close(v_means2d, v_means2d_)
-    # torch.testing.assert_close(v_conics, v_conics_)
-    # torch.testing.assert_close(v_colors, v_colors_)
-    # torch.testing.assert_close(v_opacities, v_opacities_)
+    v_means2d_, v_conics_, v_colors_, v_opacities_ = torch.autograd.grad(
+        (render_colors_ * v_render_colors).sum()
+        + (render_alphas_ * v_render_alphas).sum(),
+        (means2d, conics, colors, opacities),
+    )
+    torch.testing.assert_close(v_means2d, v_means2d_)
+    torch.testing.assert_close(v_conics, v_conics_, rtol=1e-4, atol=1e-4)
+    torch.testing.assert_close(v_colors, v_colors_)
+    torch.testing.assert_close(v_opacities, v_opacities_)
 
 
 # @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device")
@@ -268,7 +275,7 @@ def test_rasterize_to_pixels(rasterizer_test_data: dict):
 #             height,
 #             tile_size, # tile_width
 #             tile_size, # tile_height
-#             flatten_ids.reshape(-1).to(torch.uint32).contiguous(),   
+#             flatten_ids.reshape(-1).to(torch.uint32).contiguous(),
 #             isect_prefix_sum.reshape(-1).to(torch.uint32).contiguous(),
 #         )
 
@@ -291,7 +298,7 @@ def test_rasterize_to_pixels(rasterizer_test_data: dict):
 #             height,
 #             tile_size, # tile_width
 #             tile_size, # tile_height
-#             flatten_ids.reshape(-1).to(torch.uint32).contiguous(),   
+#             flatten_ids.reshape(-1).to(torch.uint32).contiguous(),
 #             isect_prefix_sum.reshape(-1).to(torch.uint32).contiguous(),
 #         )
 #     # render_colors_ shape: [n_images, image_height, image_width, channels, 2]
@@ -320,7 +327,7 @@ def test_rasterize_to_pixels(rasterizer_test_data: dict):
 #     #     height,
 #     #     tile_size, # tile_width
 #     #     tile_size, # tile_height
-#     #     flatten_ids.reshape(-1).to(torch.uint32).contiguous(),   
+#     #     flatten_ids.reshape(-1).to(torch.uint32).contiguous(),
 #     #     isect_prefix_sum.reshape(-1).to(torch.uint32).contiguous(),
 #     #     render_last_ids_.contiguous(),
 #     #     render_alphas_.contiguous(),

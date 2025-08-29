@@ -208,10 +208,10 @@ image_gaussian_rasterize_backward(
     const int64_t channels = features.size(-1);
 
     // Create outputs
-    at::Tensor v_opacities = at::empty({n_primitives}, opacities.options());
-    at::Tensor v_means2d = at::empty({n_primitives, 2}, means2d.options());
-    at::Tensor v_conics = at::empty({n_primitives, 3}, conics.options());
-    at::Tensor v_features = at::empty({n_primitives, channels}, features.options());
+    at::Tensor v_opacities = at::zeros({n_primitives}, opacities.options());
+    at::Tensor v_means2d = at::zeros({n_primitives, 2}, means2d.options());
+    at::Tensor v_conics = at::zeros({n_primitives, 3}, conics.options());
+    at::Tensor v_features = at::zeros({n_primitives, channels}, features.options());
 
     // Launch kernel
 #define __LAUNCH_KERNEL__(DIM)                                                         \

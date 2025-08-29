@@ -20,32 +20,36 @@ struct ImageGaussianRasterizeKernelBackwardOperator
     using FeatureType = fvec<FEATURE_DIM>;
 
     // Forward Inputs
-    const float *opacity_ptr; // [N, 1]
-    const fvec2 *mean_ptr;    // [N, 2]
-    const fvec3 *conic_ptr;   // [N, 3]
-    const FeatureType
-        *feature_ptr; // [N, FEATURE_DIM] (e.g., 3 for RGB or 256 for neural features)
+    const float *__restrict__ opacity_ptr;       // [N, 1]
+    const fvec2 *__restrict__ mean_ptr;          // [N, 2]
+    const fvec3 *__restrict__ conic_ptr;         // [N, 3]
+    const FeatureType *__restrict__ feature_ptr; // [N, FEATURE_DIM] (e.g., 3 for RGB or
+                                                 // 256 for neural features)
 
     // Forward Outputs
-    // FIXME: use this!!
-    const int32_t *render_last_index_ptr; // [n_images, image_height, image_width, 1]
-    const float *render_alpha_ptr;        // [n_images, image_height, image_width, 1]
+    const int32_t
+        *__restrict__ render_last_index_ptr; // [n_images, image_height, image_width, 1]
+    const float
+        *__restrict__ render_alpha_ptr; // [n_images, image_height, image_width, 1]
 
     // Gradients for Forward Outputs
-    const float *v_render_alpha_ptr; // [n_images, image_height, image_width, 1]
-    const FeatureType
-        *v_render_feature_ptr; // [n_images, image_height, image_width, FEATURE_DIM]
+    const float
+        *__restrict__ v_render_alpha_ptr; // [n_images, image_height, image_width, 1]
+    const FeatureType *__restrict__ v_render_feature_ptr; // [n_images, image_height,
+                                                          // image_width, FEATURE_DIM]
 
     // Gradients for Forward Inputs
-    float *v_opacity_ptr;       // [N, 1]
-    fvec2 *v_mean_ptr;          // [N, 2]
-    fvec3 *v_conic_ptr;         // [N, 3]
-    FeatureType *v_feature_ptr; // [N, FEATURE_DIM]
+    float *__restrict__ v_opacity_ptr;       // [N, 1]
+    fvec2 *__restrict__ v_mean_ptr;          // [N, 2]
+    fvec3 *__restrict__ v_conic_ptr;         // [N, 3]
+    FeatureType *__restrict__ v_feature_ptr; // [N, FEATURE_DIM]
 
     // Internal variables
-    float _T_final;                // final transmittance
-    float _T;                      // current transmittance (from back to front)
-    float _v_render_alpha;         // dl/d_render_alpha for this pixel
+    float _T_final;        // final transmittance
+    float _T;              // current transmittance (from back to front)
+    int32_t _last_index;   // the index of intersections ([n_isects]) for the last
+                           // one being rasterized. -1 means no intersection.
+    float _v_render_alpha; // dl/d_render_alpha for this pixel
     FeatureType _v_render_feature; // dl/d_render_feature for this pixel
     FeatureType _expected_feature =
         FeatureType::zero(); // buffer for feature accumulation
@@ -53,8 +57,6 @@ struct ImageGaussianRasterizeKernelBackwardOperator
     // Configs
     const float skip_if_alpha_smaller_than = 1.0f / 255.0f;
     const float maximum_alpha = 0.999f; // For backward numerical stability.
-    const float stop_if_next_trans_smaller_than =
-        1e-4f; // For backward numerical stability.
 
     static inline __host__ auto sm_size_per_primitive_impl() -> uint32_t {
         // cache the opacity, mean, conic, primitive_id, and feature
@@ -72,6 +74,7 @@ struct ImageGaussianRasterizeKernelBackwardOperator
         // load the initial transmittance as remaining transmittance
         this->_T_final = 1.0f - this->render_alpha_ptr[offset_pixel];
         this->_T = this->_T_final;
+        this->_last_index = this->render_last_index_ptr[offset_pixel];
         return true;
     }
 
@@ -95,9 +98,31 @@ struct ImageGaussianRasterizeKernelBackwardOperator
     }
 
     template <class WarpT>
-    inline __device__ auto
-    rasterize_impl(uint32_t batch_start, uint32_t t, WarpT &warp) -> bool {
-        // load data from shared memory
+    inline __device__ auto rasterize_impl(
+        uint32_t batch_start, uint32_t t, WarpT &warp, bool &terminated
+    ) -> bool {
+        // Flag to indicate if this GS is rendered to this pixel. If not we will skip
+        // the gradient computation. Note: we do not do early return like we do in
+        // forward pass because we need to call warpSum later so the thread needs to be
+        // alive.
+        auto maybe_rendered = true;
+
+        if (terminated) {
+            maybe_rendered = false;
+        }
+
+        // If this GS is behind the last rendered GS, then we know it is not rendered.
+        if (batch_start + t > this->_last_index) {
+            maybe_rendered = false;
+        }
+
+        // Prepare gradients that will be accumulated over the warp.
+        auto v_mean = fvec2{};
+        auto v_conic = fvec3{};
+        auto v_opacity = 0.0f;
+        auto v_feature = FeatureType::zero();
+
+        // Prepare pointers to shared memory.
         auto const sm_opacity_ptr = reinterpret_cast<float *>(this->sm_ptr);
         auto const sm_mean_ptr =
             reinterpret_cast<fvec2 *>(&sm_opacity_ptr[this->n_threads_per_block]);
@@ -105,52 +130,52 @@ struct ImageGaussianRasterizeKernelBackwardOperator
             reinterpret_cast<fvec3 *>(&sm_mean_ptr[this->n_threads_per_block]);
         auto const sm_primitive_id_ptr =
             reinterpret_cast<uint32_t *>(&sm_conic_ptr[this->n_threads_per_block]);
-        auto const sm_feature_ptr = reinterpret_cast<FeatureType *>(
-            &sm_primitive_id_ptr[this->n_threads_per_block]
-        );
-        auto const opacity = sm_opacity_ptr[t];
-        auto const mean = sm_mean_ptr[t];
-        auto const conic = sm_conic_ptr[t];
 
-        // compute the light attenuation
-        auto const &[alpha, ela_ctx] = evaluate_light_attenuation_forward(
-            opacity, mean, conic, this->pixel_x, this->pixel_y, this->maximum_alpha
-        );
+        if (maybe_rendered) {
+            // load data from shared memory
+            auto const opacity = sm_opacity_ptr[t];
+            auto const mean = sm_mean_ptr[t];
+            auto const conic = sm_conic_ptr[t];
 
-        // skip if the alpha is smaller than the threshold
-        if (alpha < this->skip_if_alpha_smaller_than) {
-            return false; // continue
+            // compute the light attenuation
+            auto const &[alpha, ela_ctx] = evaluate_light_attenuation_forward(
+                opacity, mean, conic, this->pixel_x, this->pixel_y, this->maximum_alpha
+            );
+
+            // skip if the alpha is smaller than the threshold
+            if (alpha < this->skip_if_alpha_smaller_than) {
+                maybe_rendered = false;
+            }
+
+            if (maybe_rendered) {
+                auto const sm_feature_ptr = reinterpret_cast<FeatureType *>(
+                    &sm_primitive_id_ptr[this->n_threads_per_block]
+                );
+                auto const feature = sm_feature_ptr[t];
+
+                // compute the gradient
+                auto const ra = 1.0f / (1.0f - alpha);
+                this->_T *= ra;
+                auto v_alpha = this->_T_final * ra * this->_v_render_alpha;
+
+                // weights for expectation calculation
+                auto const weight = alpha * this->_T;
+
+                // accumulate the expectation of the feature
+                v_feature = weight * this->_v_render_feature;
+
+                // The contribution of the feature to alpha:
+                v_alpha += ((feature * this->_T - this->_expected_feature * ra) *
+                            this->_v_render_feature)
+                               .sum();
+                this->_expected_feature += weight * feature;
+
+                // compute the gradient of the `evaluate_light_attenuation`
+                evaluate_light_attenuation_backward(
+                    ela_ctx, v_alpha, v_opacity, v_mean, v_conic
+                );
+            }
         }
-
-        // check if I should stop
-        auto const next_T = this->_T * (1.0f - alpha);
-        if (next_T < this->stop_if_next_trans_smaller_than) {
-            return true; // terminate
-        }
-
-        // weights for expectation calculation
-        auto const weight = alpha * this->_T;
-
-        // compute the gradient
-        auto const ra = 1.0f / (1.0f - alpha);
-        this->_T *= ra;
-        auto v_alpha = this->_T_final * ra * this->_v_render_alpha;
-
-        // accumulate the expectation of the feature
-        auto const feature = sm_feature_ptr[t];
-        FeatureType v_feature = weight * this->_v_render_feature;
-        this->_expected_feature += weight * feature;
-        v_alpha += ((feature * this->_T - this->_expected_feature * ra) *
-                    this->_v_render_feature)
-                       .sum();
-
-        // compute the gradient of the `evaluate_light_attenuation`
-        auto v_mean = fvec2{};
-        auto v_conic = fvec3{};
-        auto v_opacity = 0.0f;
-        evaluate_light_attenuation_backward(
-            ela_ctx, v_alpha, v_opacity, v_mean, v_conic
-        );
 
         // reduce the gradient over the warp [faster than atomicAdd to global memory]
         tinyrend::warp::warpSum(v_opacity, warp);
@@ -163,7 +188,7 @@ struct ImageGaussianRasterizeKernelBackwardOperator
             // TODO(ruilong): make atomicAdd work for vec
             auto const primitive_id = sm_primitive_id_ptr[t];
             float *v_opacity_ptr = (float *)this->v_opacity_ptr;
-            atomicAdd(v_opacity_ptr + primitive_id, v_alpha);
+            atomicAdd(v_opacity_ptr + primitive_id, v_opacity);
 
             float *v_mean_ptr = (float *)this->v_mean_ptr;
             atomicAdd(v_mean_ptr + primitive_id * 2, v_mean[0]);
@@ -182,7 +207,9 @@ struct ImageGaussianRasterizeKernelBackwardOperator
         }
 
         // Return whether we want to terminate the rasterization process.
-        return false;
+        // In backward pass we don't do early return so we maintain the `terminated`
+        // flag.
+        return terminated;
     }
 
     inline __device__ auto pixel_postprocess_impl() -> void {
