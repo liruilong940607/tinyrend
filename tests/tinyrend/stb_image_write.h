@@ -1364,7 +1364,7 @@ static void stbiw__wpcrc(unsigned char **data, int len) {
 }
 
 static unsigned char stbiw__paeth(int a, int b, int c) {
-    int p = a + b - c, pa = abs(p - a), pb = abs(p - b), pc = abs(p - c);
+    int p = a + b - c, pa = fabs(p - a), pb = fabs(p - b), pc = fabs(p - c);
     if (pa <= pb && pa <= pc)
         return STBIW_UCHAR(a);
     if (pb <= pc)
@@ -1508,7 +1508,7 @@ STBIWDEF unsigned char *stbi_write_png_to_mem(
                 // better.
                 est = 0;
                 for (i = 0; i < x * n; ++i) {
-                    est += abs((signed char)line_buffer[i]);
+                    est += fabs((signed char)line_buffer[i]);
                 }
                 if (est < best_filter_val) {
                     best_filter_val = est;

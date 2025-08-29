@@ -228,8 +228,8 @@ std::ostream &operator<<(std::ostream &os, const scalar_grad<T> &x) {
     return os;
 }
 
-template <typename T> TREND_HOST_DEVICE scalar_grad<T> abs(const scalar_grad<T> &a) {
-    T data = std::abs(a.scalar);
+template <typename T> TREND_HOST_DEVICE scalar_grad<T> fabs(const scalar_grad<T> &a) {
+    T data = std::fabs(a.scalar);
     T grad = a.grad * (a.scalar >= 0 ? 1 : -1);
     return scalar_grad<T>(data, grad);
 }

@@ -55,7 +55,7 @@ template <int N, int M> struct FailingTransform {
     ) const -> std::tuple<fvec<M>, bool, AuxData> {
         // Fail if any component of x is above threshold
         for (int i = 0; i < N; i++) {
-            if (std::abs(x[i]) > threshold) {
+            if (std::fabs(x[i]) > threshold) {
                 return {fvec<M>::zero(), false, AuxData{}};
             }
         }

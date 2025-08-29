@@ -88,7 +88,7 @@ endfunction()
 # Build tests if enabled
 if(BUILD_TESTS)
     build_cuda_executables_recursive(
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/tinyrend"
         tests
     )
 endif()

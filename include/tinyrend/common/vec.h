@@ -267,7 +267,7 @@ template <typename T, size_t N> struct alignas(T) vec {
     is_close(const vec<T, N> &other, T atol = 1e-5f, T rtol = 1e-5f) const {
 #pragma unroll
         for (size_t i = 0; i < N; ++i) {
-            if (abs(data[i] - other[i]) > atol + rtol * abs(other[i])) {
+            if (fabs(data[i] - other[i]) > atol + rtol * fabs(other[i])) {
                 return false;
             }
         }
@@ -331,10 +331,10 @@ template <typename T, size_t N> inline TREND_HOST_DEVICE T length2(const vec<T, 
 template <typename T, size_t N>
 inline TREND_HOST_DEVICE T safe_length(const vec<T, N> &v) {
     // Find the maximum absolute value
-    T max_abs = abs(v[0]);
+    T max_abs = fabs(v[0]);
 #pragma unroll
     for (size_t i = 1; i < N; ++i) {
-        max_abs = fmax(max_abs, abs(v[i]));
+        max_abs = fmax(max_abs, fabs(v[i]));
     }
 
     if (max_abs <= T(0))

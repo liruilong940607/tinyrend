@@ -16,9 +16,9 @@ TREND_HOST_DEVICE bool is_close(
     const scalar_grad<T> &x, const scalar_grad<T> &other, T atol = 1e-5f, T rtol = 1e-5f
 ) {
     auto const is_scalar_close =
-        abs(x.scalar - other.scalar) <= atol + rtol * abs(other.scalar);
+        fabs(x.scalar - other.scalar) <= atol + rtol * fabs(other.scalar);
     auto const is_grad_close =
-        abs(x.grad - other.grad) <= atol + rtol * abs(other.grad);
+        fabs(x.grad - other.grad) <= atol + rtol * fabs(other.grad);
     return is_scalar_close && is_grad_close;
 }
 

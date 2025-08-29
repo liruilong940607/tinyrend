@@ -352,8 +352,8 @@ template <typename T, size_t Cols, size_t Rows> struct alignas(T) mat {
         for (size_t i = 0; i < Rows; ++i) {
 #pragma unroll
             for (size_t j = 0; j < Cols; ++j) {
-                if (std::abs(data[j][i] - other(j, i)) >
-                    atol + rtol * std::abs(other(j, i))) {
+                if (std::fabs(data[j][i] - other(j, i)) >
+                    atol + rtol * std::fabs(other(j, i))) {
                     return false;
                 }
             }

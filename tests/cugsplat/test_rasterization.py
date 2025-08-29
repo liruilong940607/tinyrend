@@ -9,7 +9,7 @@ import imageio
 import numpy as np
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-BINDINGS_DIR = os.path.join(CURRENT_DIR, "..", "..")
+BINDINGS_DIR = os.path.join(CURRENT_DIR, "..", "..", "bindings")
 sys.path.append(BINDINGS_DIR)
 from cugsplat.cuda._backend import _C
 import tqdm
@@ -33,7 +33,7 @@ def create_test_data():
         height,
     ) = load_test_data(
         device=device,
-        data_path=os.path.join(os.path.dirname(__file__), "../../../assets/test_garden.npz"),
+        data_path=os.path.join(os.path.dirname(__file__), "../../assets/test_garden.npz"),
     )
     return {
         "means": means,  # [N, 3]

@@ -19,12 +19,12 @@
 // Helper function to check if two vectors are close within absolute and relative
 // tolerances
 bool is_close(const float &a, const float &b, float atol = 1e-4f, float rtol = 1e-4f) {
-    return std::abs(a - b) <= atol + rtol * std::abs(b);
+    return std::fabs(a - b) <= atol + rtol * std::fabs(b);
 }
 bool is_close(
     const double &a, const double &b, double atol = 1e-4, double rtol = 1e-4
 ) {
-    return std::abs(a - b) <= atol + rtol * std::abs(b);
+    return std::fabs(a - b) <= atol + rtol * std::fabs(b);
 }
 
 template <typename T, size_t N>
