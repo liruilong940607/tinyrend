@@ -4,6 +4,7 @@ import pytest
 import math
 
 import torch
+import torch.autograd.forward_ad as fwAD
 
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -212,37 +213,39 @@ def test_rasterize_to_pixels_jvp(rasterizer_test_data: dict, benchmark: bool):
             flatten_ids,
         )
 
-    v_means2d = torch.rand_like(means2d)
-    v_conics = torch.rand_like(conics)
-    v_colors = torch.rand_like(colors)
-    v_opacities = torch.rand_like(opacities)
-
     # Normal JVP
     for jvp_mode in ["normal", "fused"]:
         for _ in tqdm.trange(
             5000 if benchmark else 1, desc=f"jvp_mode={jvp_mode}", disable=not benchmark
         ):
-            render_output_ = rasterize_to_pixels(
-                means2d,
-                conics,
-                colors,
-                opacities,
-                width,
-                height,
-                tile_size,
-                isect_offsets,
-                flatten_ids,
-                jvp_mode=jvp_mode,
-                v_means2d=v_means2d,
-                v_conics=v_conics,
-                v_colors=v_colors,
-                v_opacities=v_opacities,
-            )
+            with fwAD.dual_level():
+                render_output_ = rasterize_to_pixels(
+                    fwAD.make_dual(means2d, torch.rand_like(means2d)),
+                    fwAD.make_dual(conics, torch.rand_like(conics)),
+                    fwAD.make_dual(colors, torch.rand_like(colors)),
+                    fwAD.make_dual(opacities, torch.rand_like(opacities)),
+                    width,
+                    height,
+                    tile_size,
+                    isect_offsets,
+                    flatten_ids,
+                    jvp_mode=jvp_mode,
+                )
 
-            torch.testing.assert_close(render_output.colors, render_output_.colors)
-            torch.testing.assert_close(render_output.alphas, render_output_.alphas)
-            assert render_output_.v_colors.shape == render_output_.colors.shape
-            assert render_output_.v_alphas.shape == render_output_.alphas.shape
+                torch.testing.assert_close(
+                    fwAD.unpack_dual(render_output_.colors).primal, render_output.colors
+                )
+                torch.testing.assert_close(
+                    fwAD.unpack_dual(render_output_.alphas).primal, render_output.alphas
+                )
+                assert (
+                    fwAD.unpack_dual(render_output_.colors).tangent.shape
+                    == render_output_.colors.shape
+                )
+                assert (
+                    fwAD.unpack_dual(render_output_.alphas).tangent.shape
+                    == render_output_.alphas.shape
+                )
 
 
 if __name__ == "__main__":

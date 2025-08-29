@@ -8,6 +8,12 @@ from torch import Tensor
 from typing_extensions import Literal
 
 
+def has_tangent(tensor: Optional[Tensor]) -> bool:
+    if tensor is None:
+        return False
+    return fwAD.unpack_dual(tensor).tangent is not None
+
+
 def _make_lazy_cuda_func(name: str) -> Callable:
     def call_cuda(*args, **kwargs):
         # pylint: disable=import-outside-toplevel
@@ -18,9 +24,7 @@ def _make_lazy_cuda_func(name: str) -> Callable:
     return call_cuda
 
 
-RasterizeToPixelsOutput = namedtuple(
-    "RasterizeToPixelsOutput", ["colors", "alphas", "v_colors", "v_alphas"]
-)
+RasterizeToPixelsOutput = namedtuple("RasterizeToPixelsOutput", ["colors", "alphas"])
 
 
 def rasterize_to_pixels(
@@ -33,14 +37,13 @@ def rasterize_to_pixels(
     tile_size: int,  # int
     isect_offsets: Tensor,  # [n_images, n_tiles_y, n_tiles_x]
     flatten_ids: Tensor,  # [n_isects]
-    jvp_mode: Literal["disabled", "normal", "fused"] = "disabled",
-    v_means2d: Optional[Tensor] = None,  # tangent of means2d
-    v_conics: Optional[Tensor] = None,  # tangent of conics
-    v_colors: Optional[Tensor] = None,  # tangent of colors
-    v_opacities: Optional[Tensor] = None,  # tangent of opacities
+    jvp_mode: Literal["normal", "fused"] = "fused",
 ) -> RasterizeToPixelsOutput:
     """Rasterize gaussians to pixels"""
-    if jvp_mode == "disabled":
+    # TODO: allow partial jvp
+    enable_jvp = all([has_tangent(v) for v in [means2d, conics, colors, opacities]])
+
+    if not enable_jvp:
         render_colors, render_alphas = _RasterizeToPixels.apply(
             means2d,
             conics,
@@ -52,39 +55,32 @@ def rasterize_to_pixels(
             isect_offsets,
             flatten_ids,
         )
-        return RasterizeToPixelsOutput(
-            colors=render_colors, alphas=render_alphas, v_colors=None, v_alphas=None
-        )
+        return RasterizeToPixelsOutput(colors=render_colors, alphas=render_alphas)
 
     else:
-        with fwAD.dual_level():
-            dual_means2d = fwAD.make_dual(means2d, v_means2d)
-            dual_conics = fwAD.make_dual(conics, v_conics)
-            dual_colors = fwAD.make_dual(colors, v_colors)
-            dual_opacities = fwAD.make_dual(opacities, v_opacities)
+        assert has_tangent(means2d), "means2d.tangent is required for jvp"
+        assert has_tangent(conics), "conics.tangent is required for jvp"
+        assert has_tangent(colors), "colors.tangent is required for jvp"
+        assert has_tangent(opacities), "opacities.tangent is required for jvp"
 
-            dual_render_colors, dual_render_alphas = _RasterizeToPixels.apply(
-                dual_means2d,
-                dual_conics,
-                dual_colors,
-                dual_opacities,
-                width,
-                height,
-                tile_size,
-                isect_offsets,
-                flatten_ids,
-                jvp_mode == "fused",  # enable_fused_jvp
-                v_means2d,
-                v_conics,
-                v_colors,
-                v_opacities,
-            )
-            return RasterizeToPixelsOutput(
-                colors=fwAD.unpack_dual(dual_render_colors).primal,
-                alphas=fwAD.unpack_dual(dual_render_alphas).primal,
-                v_colors=fwAD.unpack_dual(dual_render_colors).tangent,
-                v_alphas=fwAD.unpack_dual(dual_render_alphas).tangent,
-            )
+        # The return is dual tensor.
+        render_colors, render_alphas = _RasterizeToPixels.apply(
+            means2d,
+            conics,
+            colors,
+            opacities,
+            width,
+            height,
+            tile_size,
+            isect_offsets,
+            flatten_ids,
+            jvp_mode == "fused",  # enable_fused_jvp
+            fwAD.unpack_dual(means2d).tangent,
+            fwAD.unpack_dual(conics).tangent,
+            fwAD.unpack_dual(colors).tangent,
+            fwAD.unpack_dual(opacities).tangent,
+        )
+        return RasterizeToPixelsOutput(colors=render_colors, alphas=render_alphas)
 
 
 class _RasterizeToPixels(torch.autograd.Function):
