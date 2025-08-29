@@ -256,10 +256,10 @@ def test_rasterize_to_pixels_jvp(rasterizer_test_data: dict, benchmark: bool):
                 isect_offsets,
                 flatten_ids,
                 True,  # enable_fused_jvp
-                fwAD.unpack_dual(dual_means2d).tangent,  # means2d_tangent
-                fwAD.unpack_dual(dual_conics).tangent,  # conics_tangent
-                fwAD.unpack_dual(dual_colors).tangent,  # colors_tangent
-                fwAD.unpack_dual(dual_opacities).tangent,  # opacities_tangent
+                fwAD.unpack_dual(dual_means2d).tangent,  # v_means2d
+                fwAD.unpack_dual(dual_conics).tangent,  # v_conics
+                fwAD.unpack_dual(dual_colors).tangent,  # v_colors
+                fwAD.unpack_dual(dual_opacities).tangent,  # v_opacities
             )
         torch.testing.assert_close(
             render_colors, fwAD.unpack_dual(dual_render_colors_).primal
