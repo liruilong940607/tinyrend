@@ -61,6 +61,10 @@ class _RasterizeToPixels(torch.autograd.Function):
         isect_offsets = isect_offsets.contiguous()
         isect_primitive_ids = flatten_ids.to(torch.uint32).contiguous()
 
+        # Mark non-differentiable tensors
+        ctx.mark_non_differentiable(isect_offsets)
+        ctx.mark_non_differentiable(isect_primitive_ids)
+
         # Note: new API requires inclusive sum (i.e. prefix sum) while in old gsplat API
         # the `isect_offsets` stores exclusive sum. So we convert it here.
         # TODO: update the intersection API to produce inclusive sum.
@@ -89,6 +93,20 @@ class _RasterizeToPixels(torch.autograd.Function):
             # Intersections
             isect_primitive_ids,
             isect_prefix_sum_per_tile,
+        )
+
+        ctx.save_for_forward(
+            # Primitives
+            opacities,
+            means2d,
+            conics,
+            colors,
+            # Intersections
+            isect_primitive_ids,
+            isect_prefix_sum_per_tile,
+            # Forward Outputs
+            render_alphas,
+            last_ids,
         )
 
         ctx.save_for_backward(
@@ -175,3 +193,63 @@ class _RasterizeToPixels(torch.autograd.Function):
             None,
             None,
         )
+
+    @staticmethod
+    def jvp(
+        ctx,
+        v_means2d: Tensor,
+        v_conics: Tensor,
+        v_colors: Tensor,
+        v_opacities: Tensor,
+        unused_v_width: int,
+        unused_v_height: int,
+        unused_v_tile_size: int,
+        unused_v_isect_offsets: Tensor,
+        unused_v_flatten_ids: Tensor,
+    ):
+        (
+            # Primitives
+            opacities,
+            means2d,
+            conics,
+            colors,
+            # Intersections
+            isect_primitive_ids,
+            isect_prefix_sum_per_tile,
+            # Forward Outputs
+            render_alphas,
+            last_ids,
+        ) = ctx.saved_tensors
+        n_images = ctx.n_images
+        width = ctx.width
+        height = ctx.height
+        tile_size = ctx.tile_size
+
+        assert v_opacities.shape == opacities.shape, f"Got {v_opacities.shape=}, {opacities.shape=}"
+        assert v_means2d.shape == means2d.shape, f"Got {v_means2d.shape=}, {means2d.shape=}"
+        assert v_conics.shape == conics.shape, f"Got {v_conics.shape=}, {conics.shape=}"
+        assert v_colors.shape == colors.shape, f"Got {v_colors.shape=}, {colors.shape=}"
+
+        render_colors, render_alphas, _ = _make_lazy_cuda_func(
+            "image_gaussian_rasterize_jvp"
+        )(
+            # Primitives
+            torch.stack([opacities, v_opacities], dim=-1),
+            torch.stack([means2d, v_means2d], dim=-1),
+            torch.stack([conics, v_conics], dim=-1),
+            torch.stack([colors, v_colors], dim=-1),
+            # Images
+            n_images,
+            width,  # image_width
+            height,  # image_height
+            tile_size,  # tile_width
+            tile_size,  # tile_height
+            # Intersections
+            isect_primitive_ids,
+            isect_prefix_sum_per_tile,
+        )
+
+        v_render_colors = render_colors[..., 1]
+        v_render_alphas = render_alphas[..., 1]
+
+        return v_render_colors, v_render_alphas
