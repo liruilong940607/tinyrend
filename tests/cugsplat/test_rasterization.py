@@ -128,7 +128,7 @@ def test_rasterize_to_pixels(rasterizer_test_data: dict):
     tile_size = rasterizer_test_data["tile_size"]
     isect_offsets = rasterizer_test_data["isect_offsets"]
     flatten_ids = rasterizer_test_data["flatten_ids"]
-    backgrounds = rasterizer_test_data["backgrounds"] # not supported yet
+    backgrounds = rasterizer_test_data["backgrounds"]  # not supported yet
 
     means2d.requires_grad = True
     conics.requires_grad = True
@@ -194,7 +194,7 @@ def test_rasterize_to_pixels_jvp(rasterizer_test_data: dict):
     tile_size = rasterizer_test_data["tile_size"]
     isect_offsets = rasterizer_test_data["isect_offsets"]
     flatten_ids = rasterizer_test_data["flatten_ids"]
-    backgrounds = rasterizer_test_data["backgrounds"] # not supported yet
+    backgrounds = rasterizer_test_data["backgrounds"]  # not supported yet
 
     render_colors, render_alphas = _RasterizeToPixels.apply(
         means2d,
@@ -209,32 +209,61 @@ def test_rasterize_to_pixels_jvp(rasterizer_test_data: dict):
     )
 
     with fwAD.dual_level():
+        # Normal JVP
         dual_means2d = fwAD.make_dual(means2d, torch.rand_like(means2d))
         dual_conics = fwAD.make_dual(conics, torch.rand_like(conics))
         dual_colors = fwAD.make_dual(colors, torch.rand_like(colors))
         dual_opacities = fwAD.make_dual(opacities, torch.rand_like(opacities))
 
         dual_render_colors, dual_render_alphas = _RasterizeToPixels.apply(
-            dual_means2d, 
-            dual_conics, 
-            dual_colors, 
-            dual_opacities, 
-            width, 
-            height, 
-            tile_size, 
-            isect_offsets, 
-            flatten_ids
+            dual_means2d,
+            dual_conics,
+            dual_colors,
+            dual_opacities,
+            width,
+            height,
+            tile_size,
+            isect_offsets,
+            flatten_ids,
         )
+        torch.testing.assert_close(
+            render_colors, fwAD.unpack_dual(dual_render_colors).primal
+        )
+        assert render_colors.shape == fwAD.unpack_dual(dual_render_colors).tangent.shape
+        torch.testing.assert_close(
+            render_alphas, fwAD.unpack_dual(dual_render_alphas).primal
+        )
+        assert render_alphas.shape == fwAD.unpack_dual(dual_render_alphas).tangent.shape
 
-        render_colors_primal = fwAD.unpack_dual(dual_render_colors).primal
-        render_colors_jvp = fwAD.unpack_dual(dual_render_colors).tangent
-        render_alphas_primal = fwAD.unpack_dual(dual_render_alphas).primal
-        render_alphas_jvp = fwAD.unpack_dual(dual_render_alphas).tangent
-
-    torch.testing.assert_close(render_colors, render_colors_primal)
-    assert render_colors.shape == render_colors_jvp.shape
-    torch.testing.assert_close(render_alphas, render_alphas_primal)
-    assert render_alphas.shape == render_alphas_jvp.shape
+        # Fused JVP
+        dual_render_colors_, dual_render_alphas_ = _RasterizeToPixels.apply(
+            dual_means2d,
+            dual_conics,
+            dual_colors,
+            dual_opacities,
+            width,
+            height,
+            tile_size,
+            isect_offsets,
+            flatten_ids,
+            True,  # enable_fused_jvp
+            fwAD.unpack_dual(dual_means2d).tangent,  # means2d_tangent
+            fwAD.unpack_dual(dual_conics).tangent,  # conics_tangent
+            fwAD.unpack_dual(dual_colors).tangent,  # colors_tangent
+            fwAD.unpack_dual(dual_opacities).tangent,  # opacities_tangent
+        )
+        torch.testing.assert_close(
+            render_colors, fwAD.unpack_dual(dual_render_colors_).primal
+        )
+        assert (
+            render_colors.shape == fwAD.unpack_dual(dual_render_colors_).tangent.shape
+        )
+        torch.testing.assert_close(
+            render_alphas, fwAD.unpack_dual(dual_render_alphas_).primal
+        )
+        assert (
+            render_alphas.shape == fwAD.unpack_dual(dual_render_alphas_).tangent.shape
+        )
 
 
 if __name__ == "__main__":

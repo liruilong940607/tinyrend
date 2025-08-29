@@ -34,6 +34,11 @@ class _RasterizeToPixels(torch.autograd.Function):
         tile_size: int,
         isect_offsets: Tensor,  # [n_images, n_tiles_y, n_tiles_x]
         flatten_ids: Tensor,  # [n_isects]
+        enable_fused_jvp: bool = False,
+        v_means2d: Optional[Tensor] = None,
+        v_conics: Optional[Tensor] = None,
+        v_colors: Optional[Tensor] = None,
+        v_opacities: Optional[Tensor] = None,
     ) -> Tuple[Tensor, Tensor]:
         n_primitives = means2d.size(0)
         channels = colors.size(-1)
@@ -76,9 +81,25 @@ class _RasterizeToPixels(torch.autograd.Function):
             torch.uint32
         ).contiguous()
 
-        render_colors, render_alphas, last_ids = _make_lazy_cuda_func(
-            "image_gaussian_rasterize_forward"
-        )(
+        ctx.mark_non_differentiable(isect_offsets)
+        ctx.mark_non_differentiable(isect_prefix_sum_per_tile)
+
+        if enable_fused_jvp:
+            # In fused JVP, we pass in both the primal and tangent values of the primitives to
+            # the kernel and return both the primal and tangent values of the render output.
+            kernel_name = "image_gaussian_rasterize_jvp"
+            assert v_means2d is not None, "v_means2d is required for jvp"
+            assert v_conics is not None, "v_conics is required for jvp"
+            assert v_colors is not None, "v_colors is required for jvp"
+            assert v_opacities is not None, "v_opacities is required for jvp"
+            opacities = torch.stack([opacities, v_opacities], dim=-1).contiguous()
+            means2d = torch.stack([means2d, v_means2d], dim=-1).contiguous()
+            conics = torch.stack([conics, v_conics], dim=-1).contiguous()
+            colors = torch.stack([colors, v_colors], dim=-1).contiguous()
+        else:
+            kernel_name = "image_gaussian_rasterize_forward"
+
+        render_colors, render_alphas, last_ids = _make_lazy_cuda_func(kernel_name)(
             # Primitives
             opacities,
             means2d,
@@ -95,16 +116,28 @@ class _RasterizeToPixels(torch.autograd.Function):
             isect_prefix_sum_per_tile,
         )
 
-        ctx.save_for_forward(
-            # Primitives
-            opacities,
-            means2d,
-            conics,
-            colors,
-            # Intersections
-            isect_primitive_ids,
-            isect_prefix_sum_per_tile,
-        )
+        if enable_fused_jvp:
+            # In fused JVP, the output contains both the primal and tangent values.
+            # We save the tangents in the ctx, so that jvp() can directly return them.
+            render_colors, render_colors_tangent = torch.unbind(render_colors, dim=-1)
+            render_alphas, render_alphas_tangent = torch.unbind(render_alphas, dim=-1)
+            render_colors = render_colors.contiguous()
+            render_alphas = render_alphas.contiguous()
+            render_colors_tangent = render_colors_tangent.contiguous()
+            render_alphas_tangent = render_alphas_tangent.contiguous()
+            ctx.save_for_forward(render_colors_tangent, render_alphas_tangent)
+
+        else:
+            ctx.save_for_forward(
+                # Primitives
+                opacities,
+                means2d,
+                conics,
+                colors,
+                # Intersections
+                isect_primitive_ids,
+                isect_prefix_sum_per_tile,
+            )
 
         ctx.save_for_backward(
             # Primitives
@@ -123,6 +156,7 @@ class _RasterizeToPixels(torch.autograd.Function):
         ctx.width = width
         ctx.height = height
         ctx.tile_size = tile_size
+        ctx.enable_fused_jvp = enable_fused_jvp
 
         return render_colors, render_alphas
 
@@ -184,11 +218,16 @@ class _RasterizeToPixels(torch.autograd.Function):
             v_conics,  # v_conics
             v_colors,  # v_colors
             v_opacities,  # v_opacities
-            None,
-            None,
-            None,
-            None,
-            None,
+            None,  # v_width
+            None,  # v_height
+            None,  # v_tile_size
+            None,  # v_isect_offsets
+            None,  # v_flatten_ids
+            None,  # v_enable_fused_jvp
+            None,  # v_means2d_tangent
+            None,  # v_conics_tangent
+            None,  # v_colors_tangent
+            None,  # v_opacities_tangent
         )
 
     @staticmethod
@@ -203,7 +242,20 @@ class _RasterizeToPixels(torch.autograd.Function):
         unused_v_tile_size: int,
         unused_v_isect_offsets: Tensor,
         unused_v_flatten_ids: Tensor,
+        unused_enable_fused_jvp: bool = False,
+        unused_v_means2d: Optional[Tensor] = None,
+        unused_v_conics: Optional[Tensor] = None,
+        unused_v_colors: Optional[Tensor] = None,
+        unused_v_opacities: Optional[Tensor] = None,
     ):
+        if ctx.enable_fused_jvp:
+            # In fused JVP, we expect the tangents have been computed in the forward pass.
+            # so we could just grab and return.
+            v_render_colors, v_render_alphas = ctx.saved_tensors
+            assert v_render_colors is not None, "forward should have saved the tangents"
+            assert v_render_alphas is not None, "forward should have saved the tangents"
+            return v_render_colors, v_render_alphas
+
         (
             # Primitives
             opacities,
@@ -219,8 +271,12 @@ class _RasterizeToPixels(torch.autograd.Function):
         height = ctx.height
         tile_size = ctx.tile_size
 
-        assert v_opacities.shape == opacities.shape, f"Got {v_opacities.shape=}, {opacities.shape=}"
-        assert v_means2d.shape == means2d.shape, f"Got {v_means2d.shape=}, {means2d.shape=}"
+        assert (
+            v_opacities.shape == opacities.shape
+        ), f"Got {v_opacities.shape=}, {opacities.shape=}"
+        assert (
+            v_means2d.shape == means2d.shape
+        ), f"Got {v_means2d.shape=}, {means2d.shape=}"
         assert v_conics.shape == conics.shape, f"Got {v_conics.shape=}, {conics.shape=}"
         assert v_colors.shape == colors.shape, f"Got {v_colors.shape=}, {colors.shape=}"
 
