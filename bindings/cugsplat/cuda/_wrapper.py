@@ -1,8 +1,11 @@
 import math
 from typing import Callable, Optional, Tuple
+from collections import namedtuple
 
 import torch
+import torch.autograd.forward_ad as fwAD
 from torch import Tensor
+from typing_extensions import Literal
 
 
 def _make_lazy_cuda_func(name: str) -> Callable:
@@ -15,8 +18,77 @@ def _make_lazy_cuda_func(name: str) -> Callable:
     return call_cuda
 
 
+RasterizeToPixelsOutput = namedtuple(
+    "RasterizeToPixelsOutput", ["colors", "alphas", "v_colors", "v_alphas"]
+)
+
+
+def rasterize_to_pixels(
+    means2d: Tensor,  # [n_primitives, 2]
+    conics: Tensor,  # [n_primitives, 3]
+    colors: Tensor,  # [n_primitives, channels]
+    opacities: Tensor,  # [n_primitives]
+    width: int,  # int
+    height: int,  # int
+    tile_size: int,  # int
+    isect_offsets: Tensor,  # [n_images, n_tiles_y, n_tiles_x]
+    flatten_ids: Tensor,  # [n_isects]
+    jvp_mode: Literal["disabled", "normal", "fused"] = "disabled",
+    v_means2d: Optional[Tensor] = None,  # tangent of means2d
+    v_conics: Optional[Tensor] = None,  # tangent of conics
+    v_colors: Optional[Tensor] = None,  # tangent of colors
+    v_opacities: Optional[Tensor] = None,  # tangent of opacities
+) -> RasterizeToPixelsOutput:
+    """Rasterize gaussians to pixels"""
+    if jvp_mode == "disabled":
+        render_colors, render_alphas = _RasterizeToPixels.apply(
+            means2d,
+            conics,
+            colors,
+            opacities,
+            width,
+            height,
+            tile_size,
+            isect_offsets,
+            flatten_ids,
+        )
+        return RasterizeToPixelsOutput(
+            colors=render_colors, alphas=render_alphas, v_colors=None, v_alphas=None
+        )
+
+    else:
+        with fwAD.dual_level():
+            dual_means2d = fwAD.make_dual(means2d, v_means2d)
+            dual_conics = fwAD.make_dual(conics, v_conics)
+            dual_colors = fwAD.make_dual(colors, v_colors)
+            dual_opacities = fwAD.make_dual(opacities, v_opacities)
+
+            dual_render_colors, dual_render_alphas = _RasterizeToPixels.apply(
+                dual_means2d,
+                dual_conics,
+                dual_colors,
+                dual_opacities,
+                width,
+                height,
+                tile_size,
+                isect_offsets,
+                flatten_ids,
+                jvp_mode == "fused",  # enable_fused_jvp
+                v_means2d,
+                v_conics,
+                v_colors,
+                v_opacities,
+            )
+            return RasterizeToPixelsOutput(
+                colors=fwAD.unpack_dual(dual_render_colors).primal,
+                alphas=fwAD.unpack_dual(dual_render_alphas).primal,
+                v_colors=fwAD.unpack_dual(dual_render_colors).tangent,
+                v_alphas=fwAD.unpack_dual(dual_render_alphas).tangent,
+            )
+
+
 class _RasterizeToPixels(torch.autograd.Function):
-    """Rasterize gaussians"""
+    """Rasterize gaussians to pixels"""
 
     @staticmethod
     def forward(
