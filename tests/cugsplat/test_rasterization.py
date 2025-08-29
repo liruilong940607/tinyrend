@@ -10,7 +10,6 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BINDINGS_DIR = os.path.join(CURRENT_DIR, "..", "..", "bindings")
 sys.path.append(BINDINGS_DIR)
 from cugsplat.cuda._wrapper import rasterize_to_pixels
-import torch.autograd.forward_ad as fwAD
 import tqdm
 
 device = torch.device("cuda")
