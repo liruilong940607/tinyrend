@@ -44,6 +44,7 @@ def create_test_data():
         "quats": quats,  # [N, 4]
         "scales": scales,  # [N, 3]
         "opacities": opacities,  # [N]
+        "colors": colors,  # [N, 3]
         "viewmats": viewmats,  # [C, 4, 4]
         "Ks": Ks,  # [C, 3, 3]
         "width": width,
@@ -60,18 +61,19 @@ def create_rasterizer_test_data():
         quat_scale_to_covar_preci,
     )
 
-    N = test_data["means"][::10].shape[0]
+    N = test_data["means"].shape[0]
     C = test_data["viewmats"].shape[0]
 
     Ks = test_data["Ks"]
     viewmats = test_data["viewmats"]
     height = test_data["height"]
     width = test_data["width"]
-    quats = test_data["quats"][::10]
-    scales = test_data["scales"][::10]
-    means = test_data["means"][::10]
-    opacities = test_data["opacities"][::10]
-    colors = torch.rand(C, N, 3, device=device)
+    quats = test_data["quats"]
+    scales = test_data["scales"]
+    means = test_data["means"]
+    opacities = test_data["opacities"]
+    colors = test_data["colors"]
+    colors = torch.broadcast_to(colors[None, :, :], (C, N, 3))
     backgrounds = torch.zeros((C, 3), device=device)
 
     covars, _ = quat_scale_to_covar_preci(quats, scales, compute_preci=False, triu=True)
@@ -84,24 +86,24 @@ def create_rasterizer_test_data():
 
     # Identify intersecting tiles
     tile_size = 16
-    tile_width = math.ceil(width / float(tile_size))
-    tile_height = math.ceil(height / float(tile_size))
+    n_tile_x = math.ceil(width / float(tile_size))
+    n_tile_y = math.ceil(height / float(tile_size))
     tiles_per_gauss, isect_ids, flatten_ids = isect_tiles(
-        means2d, radii, depths, tile_size, tile_width, tile_height
+        means2d, radii, depths, tile_size, n_tile_x, n_tile_y
     )
-    isect_offsets = isect_offset_encode(isect_ids, C, tile_width, tile_height)
+    isect_offsets = isect_offset_encode(isect_ids, C, n_tile_x, n_tile_y)
 
     return {
-        "means2d": means2d,
-        "conics": conics,
-        "colors": colors,
-        "opacities": opacities,
-        "width": width,
-        "height": height,
-        "tile_size": tile_size,
-        "isect_offsets": isect_offsets,
-        "flatten_ids": flatten_ids,
-        "backgrounds": backgrounds,
+        "means2d": means2d, # [C, N, 2]
+        "conics": conics, # [C, N, 3]
+        "colors": colors, # [C, N, 3]
+        "opacities": opacities, # [C, N]
+        "width": width, # int
+        "height": height, # int
+        "tile_size": tile_size, # int
+        "isect_offsets": isect_offsets, # [C, n_tile_x, n_tile_y]
+        "flatten_ids": flatten_ids, # [isects]
+        "backgrounds": backgrounds, # [C, 3]
     }
 
 
@@ -198,7 +200,7 @@ def test_rasterize_to_pixels_jvp(rasterizer_test_data: dict, benchmark: bool):
     backgrounds = rasterizer_test_data["backgrounds"]  # not supported yet
 
     # Forward pass
-    for _ in tqdm.trange(20000 if benchmark else 1, desc="Forward", disable=not benchmark):
+    for _ in tqdm.trange(5000 if benchmark else 1, desc="Forward", disable=not benchmark):
         render_colors, render_alphas = _RasterizeToPixels.apply(
             means2d,
             conics,
@@ -219,7 +221,7 @@ def test_rasterize_to_pixels_jvp(rasterizer_test_data: dict, benchmark: bool):
         dual_opacities = fwAD.make_dual(opacities, torch.rand_like(opacities))
 
         for _ in tqdm.trange(
-            20000 if benchmark else 1, desc="Normal JVP", disable=not benchmark
+            5000 if benchmark else 1, desc="Normal JVP", disable=not benchmark
         ):
             dual_render_colors, dual_render_alphas = _RasterizeToPixels.apply(
                 dual_means2d,
@@ -243,7 +245,7 @@ def test_rasterize_to_pixels_jvp(rasterizer_test_data: dict, benchmark: bool):
 
         # Fused JVP
         for _ in tqdm.trange(
-            20000 if benchmark else 1, desc="Fused JVP", disable=not benchmark
+            5000 if benchmark else 1, desc="Fused JVP", disable=not benchmark
         ):
             dual_render_colors_, dual_render_alphas_ = _RasterizeToPixels.apply(
                 dual_means2d,
