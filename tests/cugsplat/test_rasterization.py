@@ -184,7 +184,8 @@ def test_rasterize_to_pixels(rasterizer_test_data: dict):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device")
-def test_rasterize_to_pixels_jvp(rasterizer_test_data: dict):
+@pytest.mark.parametrize("benchmark", [False])
+def test_rasterize_to_pixels_jvp(rasterizer_test_data: dict, benchmark: bool):
     means2d = rasterizer_test_data["means2d"].reshape(-1, 2)
     conics = rasterizer_test_data["conics"].reshape(-1, 3)
     colors = rasterizer_test_data["colors"].reshape(-1, 3)
@@ -196,17 +197,19 @@ def test_rasterize_to_pixels_jvp(rasterizer_test_data: dict):
     flatten_ids = rasterizer_test_data["flatten_ids"]
     backgrounds = rasterizer_test_data["backgrounds"]  # not supported yet
 
-    render_colors, render_alphas = _RasterizeToPixels.apply(
-        means2d,
-        conics,
-        colors,
-        opacities,
-        width,
-        height,
-        tile_size,
-        isect_offsets,
-        flatten_ids,
-    )
+    # Forward pass
+    for _ in tqdm.trange(20000 if benchmark else 1, desc="Forward", disable=not benchmark):
+        render_colors, render_alphas = _RasterizeToPixels.apply(
+            means2d,
+            conics,
+            colors,
+            opacities,
+            width,
+            height,
+            tile_size,
+            isect_offsets,
+            flatten_ids,
+        )
 
     with fwAD.dual_level():
         # Normal JVP
@@ -215,17 +218,20 @@ def test_rasterize_to_pixels_jvp(rasterizer_test_data: dict):
         dual_colors = fwAD.make_dual(colors, torch.rand_like(colors))
         dual_opacities = fwAD.make_dual(opacities, torch.rand_like(opacities))
 
-        dual_render_colors, dual_render_alphas = _RasterizeToPixels.apply(
-            dual_means2d,
-            dual_conics,
-            dual_colors,
-            dual_opacities,
-            width,
-            height,
-            tile_size,
-            isect_offsets,
-            flatten_ids,
-        )
+        for _ in tqdm.trange(
+            20000 if benchmark else 1, desc="Normal JVP", disable=not benchmark
+        ):
+            dual_render_colors, dual_render_alphas = _RasterizeToPixels.apply(
+                dual_means2d,
+                dual_conics,
+                dual_colors,
+                dual_opacities,
+                width,
+                height,
+                tile_size,
+                isect_offsets,
+                flatten_ids,
+            )
         torch.testing.assert_close(
             render_colors, fwAD.unpack_dual(dual_render_colors).primal
         )
@@ -236,22 +242,25 @@ def test_rasterize_to_pixels_jvp(rasterizer_test_data: dict):
         assert render_alphas.shape == fwAD.unpack_dual(dual_render_alphas).tangent.shape
 
         # Fused JVP
-        dual_render_colors_, dual_render_alphas_ = _RasterizeToPixels.apply(
-            dual_means2d,
-            dual_conics,
-            dual_colors,
-            dual_opacities,
-            width,
-            height,
-            tile_size,
-            isect_offsets,
-            flatten_ids,
-            True,  # enable_fused_jvp
-            fwAD.unpack_dual(dual_means2d).tangent,  # means2d_tangent
-            fwAD.unpack_dual(dual_conics).tangent,  # conics_tangent
-            fwAD.unpack_dual(dual_colors).tangent,  # colors_tangent
-            fwAD.unpack_dual(dual_opacities).tangent,  # opacities_tangent
-        )
+        for _ in tqdm.trange(
+            20000 if benchmark else 1, desc="Fused JVP", disable=not benchmark
+        ):
+            dual_render_colors_, dual_render_alphas_ = _RasterizeToPixels.apply(
+                dual_means2d,
+                dual_conics,
+                dual_colors,
+                dual_opacities,
+                width,
+                height,
+                tile_size,
+                isect_offsets,
+                flatten_ids,
+                True,  # enable_fused_jvp
+                fwAD.unpack_dual(dual_means2d).tangent,  # means2d_tangent
+                fwAD.unpack_dual(dual_conics).tangent,  # conics_tangent
+                fwAD.unpack_dual(dual_colors).tangent,  # colors_tangent
+                fwAD.unpack_dual(dual_opacities).tangent,  # opacities_tangent
+            )
         torch.testing.assert_close(
             render_colors, fwAD.unpack_dual(dual_render_colors_).primal
         )
@@ -270,4 +279,6 @@ if __name__ == "__main__":
     rasterizer_test_data = create_rasterizer_test_data()
 
     test_rasterize_to_pixels(rasterizer_test_data=rasterizer_test_data)
-    test_rasterize_to_pixels_jvp(rasterizer_test_data=rasterizer_test_data)
+    test_rasterize_to_pixels_jvp(
+        rasterizer_test_data=rasterizer_test_data, benchmark=True
+    )
