@@ -270,6 +270,6 @@ if __name__ == "__main__":
     rasterizer_test_data = create_rasterizer_test_data()
 
     test_rasterize_to_pixels(rasterizer_test_data=rasterizer_test_data, benchmark=True)
-    test_rasterize_to_pixels_jvp(
-        rasterizer_test_data=rasterizer_test_data, benchmark=True
-    )
+    # test_rasterize_to_pixels_jvp(
+    #     rasterizer_test_data=rasterizer_test_data, benchmark=True
+    # )

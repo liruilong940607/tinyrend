@@ -45,11 +45,12 @@ struct ImageGaussianRasterizeKernelBackwardOperator
     FeatureType *__restrict__ v_feature_ptr; // [N, FEATURE_DIM]
 
     // Internal variables
-    float _T_final;        // final transmittance
-    float _T;              // current transmittance (from back to front)
-    int32_t _last_index;   // the index of intersections ([n_isects]) for the last
-                           // one being rasterized. -1 means no intersection.
-    float _v_render_alpha; // dl/d_render_alpha for this pixel
+    float _T_final;           // final transmittance
+    float _T;                 // current transmittance (from back to front)
+    int32_t _last_index;      // the index of intersections ([n_isects]) for the last
+                              // one being rasterized. -1 means no intersection.
+    int32_t _warp_last_index; // the maximum _last_index in all threads in the warp.
+    float _v_render_alpha;    // dl/d_render_alpha for this pixel
     FeatureType _v_render_feature; // dl/d_render_feature for this pixel
     FeatureType _expected_feature =
         FeatureType::zero(); // buffer for feature accumulation
@@ -75,6 +76,11 @@ struct ImageGaussianRasterizeKernelBackwardOperator
         this->_T_final = 1.0f - this->render_alpha_ptr[offset_pixel];
         this->_T = this->_T_final;
         this->_last_index = this->render_last_index_ptr[offset_pixel];
+
+        cg::thread_block_tile<32> warp =
+            cg::tiled_partition<32>(cg::this_thread_block());
+        this->_warp_last_index =
+            cg::reduce(warp, this->_last_index, cg::greater<int>());
         return true;
     }
 
@@ -101,6 +107,12 @@ struct ImageGaussianRasterizeKernelBackwardOperator
     inline __device__ auto rasterize_impl(
         uint32_t batch_start, uint32_t t, WarpT &warp, bool &terminated
     ) -> bool {
+        // If this GS is behind the maximum last rendered GS in the warp, then we know
+        // this GS is not rendered by any pixel in the warp. So we can early return.
+        if (batch_start + t > this->_warp_last_index) {
+            return terminated;
+        }
+
         // Flag to indicate if this GS is rendered to this pixel. If not we will skip
         // the gradient computation. Note: we do not do early return like we do in
         // forward pass because we need to call warpSum later so the thread needs to be
@@ -111,7 +123,9 @@ struct ImageGaussianRasterizeKernelBackwardOperator
             maybe_rendered = false;
         }
 
-        // If this GS is behind the last rendered GS, then we know it is not rendered.
+        // If this GS is behind the last rendered GS of this pixel, then we know it is
+        // not rendered. But we still need to keep this thread alive as this GS might
+        // contribute to other pixels in the warp.
         if (batch_start + t > this->_last_index) {
             maybe_rendered = false;
         }

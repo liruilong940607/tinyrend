@@ -191,10 +191,7 @@ __global__ void rasterize_kernel(
          reverse_order ? --b : ++b) {
         // resync all threads before beginning next batch and early stop if entire
         // tile is terminated.
-        // reverse order is for backward pass, where we will likely do
-        // warp level sync, so we don't do early stop when in reverse order.
-        if ((__syncthreads_count(terminated) >= n_threads_per_block) &&
-            !reverse_order) {
+        if (__syncthreads_count(terminated) >= n_threads_per_block) {
             break;
         }
 
