@@ -77,8 +77,7 @@ struct ImageGaussianRasterizeKernelBackwardOperator
         this->_T = this->_T_final;
         this->_last_index = this->render_last_index_ptr[offset_pixel];
 
-        cg::thread_block_tile<32> warp =
-            cg::tiled_partition<32>(cg::this_thread_block());
+        auto warp = cg::tiled_partition<32>(cg::this_thread_block());
         this->_warp_last_index =
             cg::reduce(warp, this->_last_index, cg::greater<int>());
         return true;
@@ -189,6 +188,11 @@ struct ImageGaussianRasterizeKernelBackwardOperator
                     ela_ctx, v_alpha, v_opacity, v_mean, v_conic
                 );
             }
+        }
+
+        // If this GS is not rendered to any pixel in the warp, we can early return.
+        if (!warp.any(maybe_rendered)) {
+            return terminated;
         }
 
         // reduce the gradient over the warp [faster than atomicAdd to global memory]
