@@ -65,7 +65,7 @@ struct ImageGaussianRasterizeKernelBackwardOperator
                sizeof(FeatureType);
     }
 
-    inline __device__ auto initialize_impl() -> bool {
+    template <class WarpT> inline __device__ auto initialize_impl(WarpT &warp) -> bool {
         // load the gradient for this pixel
         auto const offset_pixel =
             this->image_id * this->image_height * this->image_width + this->pixel_id;
@@ -77,7 +77,6 @@ struct ImageGaussianRasterizeKernelBackwardOperator
         this->_T = this->_T_final;
         this->_last_index = this->render_last_index_ptr[offset_pixel];
 
-        auto warp = cg::tiled_partition<32>(cg::this_thread_block());
         this->_warp_last_index =
             cg::reduce(warp, this->_last_index, cg::greater<int>());
         return true;

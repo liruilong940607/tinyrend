@@ -33,7 +33,9 @@ struct PlanerRasterizeKernelForwardOperator
         return sizeof(float);
     }
 
-    inline __device__ auto initialize_impl() -> bool { return true; }
+    template <class WarpT> inline __device__ auto initialize_impl(WarpT &warp) -> bool {
+        return true;
+    }
 
     inline __device__ auto primitive_preprocess_impl(uint32_t primitive_id) -> void {
         // cache data to shared memory
@@ -131,7 +133,7 @@ struct PlanerRasterizeKernelBackwardOperator
         return sizeof(float) + sizeof(uint32_t);
     }
 
-    inline __device__ auto initialize_impl() -> bool {
+    template <class WarpT> inline __device__ auto initialize_impl(WarpT &warp) -> bool {
         // load the gradient for this pixel
         auto const offset_pixel =
             this->image_id * this->image_height * this->image_width + this->pixel_id;

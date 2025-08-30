@@ -57,7 +57,9 @@ struct ImageGaussianRasterizeKernelJvpOperator
                sizeof(uint32_t);
     }
 
-    inline __device__ auto initialize_impl() -> bool { return true; }
+    template <class WarpT> inline __device__ auto initialize_impl(WarpT &warp) -> bool {
+        return true;
+    }
 
     inline __device__ auto primitive_preprocess_impl(uint32_t primitive_id) -> void {
         // cache data to shared memory

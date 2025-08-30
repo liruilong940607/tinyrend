@@ -19,6 +19,7 @@ template <typename Derived> struct BaseRasterizeKernelOperator {
         return Derived::sm_size_per_primitive_impl();
     }
 
+    template <class WarpT>
     inline __device__ auto initialize(
         uint32_t image_id,
         uint32_t pixel_x,
@@ -27,7 +28,8 @@ template <typename Derived> struct BaseRasterizeKernelOperator {
         uint32_t image_height,
         char *sm_ptr,
         uint32_t thread_rank,
-        uint32_t n_threads_per_block
+        uint32_t n_threads_per_block,
+        WarpT &warp
     ) -> bool {
         this->image_id = image_id;
         this->pixel_x = pixel_x;
@@ -38,7 +40,7 @@ template <typename Derived> struct BaseRasterizeKernelOperator {
         this->thread_rank = thread_rank;
         this->pixel_id = pixel_y * image_width + pixel_x;
         this->n_threads_per_block = n_threads_per_block;
-        return static_cast<Derived *>(this)->initialize_impl();
+        return static_cast<Derived *>(this)->initialize_impl(warp);
     }
 
     inline __device__ auto primitive_preprocess(uint32_t primitive_id) -> void {
@@ -165,7 +167,8 @@ __global__ void rasterize_kernel(
         image_height,
         sm,
         thread_rank,
-        n_threads_per_block
+        n_threads_per_block,
+        warp
     );
 
     // Check if the pixel is inside the image. If not, we still keep this thread
