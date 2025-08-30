@@ -116,7 +116,8 @@ def rasterizer_test_data():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device")
-def test_rasterize_to_pixels(rasterizer_test_data: dict):
+@pytest.mark.parametrize("benchmark", [False])
+def test_rasterize_to_pixels(rasterizer_test_data: dict, benchmark: bool):
     from gsplat.cuda._wrapper import rasterize_to_pixels as rasterize_to_pixels_gsplat
 
     means2d = rasterizer_test_data["means2d"]
@@ -137,28 +138,35 @@ def test_rasterize_to_pixels(rasterizer_test_data: dict):
     backgrounds.requires_grad = True
 
     # forward
-    render_colors, render_alphas = rasterize_to_pixels_gsplat(
-        means2d,
-        conics,
-        colors,
-        opacities,
-        width,
-        height,
-        tile_size,
-        isect_offsets,
-        flatten_ids,
-    )
-    render_output = rasterize_to_pixels(
-        means2d.reshape(-1, 2),
-        conics.reshape(-1, 3),
-        colors.reshape(-1, 3),
-        opacities.reshape(-1),
-        width,
-        height,
-        tile_size,
-        isect_offsets,
-        flatten_ids,
-    )
+    for _ in tqdm.trange(
+        5000 if benchmark else 1, desc="gsplat:forward", disable=not benchmark
+    ):
+        render_colors, render_alphas = rasterize_to_pixels_gsplat(
+            means2d,
+            conics,
+            colors,
+            opacities,
+            width,
+            height,
+            tile_size,
+            isect_offsets,
+            flatten_ids,
+        )
+
+    for _ in tqdm.trange(
+        5000 if benchmark else 1, desc="cugsplat:forward", disable=not benchmark
+    ):
+        render_output = rasterize_to_pixels(
+            means2d.reshape(-1, 2),
+            conics.reshape(-1, 3),
+            colors.reshape(-1, 3),
+            opacities.reshape(-1),
+            width,
+            height,
+            tile_size,
+            isect_offsets,
+            flatten_ids,
+        )
 
     torch.testing.assert_close(render_colors, render_output.colors)
     torch.testing.assert_close(render_alphas, render_output.alphas)
@@ -167,16 +175,26 @@ def test_rasterize_to_pixels(rasterizer_test_data: dict):
     v_render_colors = torch.rand_like(render_colors)
     v_render_alphas = torch.rand_like(render_alphas)
 
-    v_means2d, v_conics, v_colors, v_opacities = torch.autograd.grad(
-        (render_colors * v_render_colors).sum()
-        + (render_alphas * v_render_alphas).sum(),
-        (means2d, conics, colors, opacities),
-    )
-    v_means2d_, v_conics_, v_colors_, v_opacities_ = torch.autograd.grad(
-        (render_output.colors * v_render_colors).sum()
-        + (render_output.alphas * v_render_alphas).sum(),
-        (means2d, conics, colors, opacities),
-    )
+    for _ in tqdm.trange(
+        5000 if benchmark else 1, desc="gsplat:backward", disable=not benchmark
+    ):
+        v_means2d, v_conics, v_colors, v_opacities = torch.autograd.grad(
+            (render_colors * v_render_colors).sum()
+            + (render_alphas * v_render_alphas).sum(),
+            (means2d, conics, colors, opacities),
+            create_graph=True,
+        )
+
+    for _ in tqdm.trange(
+        5000 if benchmark else 1, desc="cugsplat:backward", disable=not benchmark
+    ):
+        v_means2d_, v_conics_, v_colors_, v_opacities_ = torch.autograd.grad(
+            (render_output.colors * v_render_colors).sum()
+            + (render_output.alphas * v_render_alphas).sum(),
+            (means2d, conics, colors, opacities),
+            create_graph=True,
+        )
+
     torch.testing.assert_close(v_means2d, v_means2d_)
     torch.testing.assert_close(v_conics, v_conics_, rtol=1e-4, atol=1e-4)
     torch.testing.assert_close(v_colors, v_colors_)
@@ -251,7 +269,7 @@ def test_rasterize_to_pixels_jvp(rasterizer_test_data: dict, benchmark: bool):
 if __name__ == "__main__":
     rasterizer_test_data = create_rasterizer_test_data()
 
-    test_rasterize_to_pixels(rasterizer_test_data=rasterizer_test_data)
+    test_rasterize_to_pixels(rasterizer_test_data=rasterizer_test_data, benchmark=True)
     test_rasterize_to_pixels_jvp(
         rasterizer_test_data=rasterizer_test_data, benchmark=True
     )
