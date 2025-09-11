@@ -1,4 +1,3 @@
-#include <cooperative_groups.h>
 #include <cstdint>
 
 #include "ProjectionFusedEWA3DGS.h"
@@ -12,8 +11,6 @@
 namespace cugsplat {
 
 using namespace tinyrend;
-
-namespace cg = cooperative_groups;
 
 __global__ void projection_fused_ewa_3dgs_fwd_kernel(
     // Perfect Pinhole Camera: All cameras share the same intrinsic.
@@ -42,7 +39,7 @@ __global__ void projection_fused_ewa_3dgs_fwd_kernel(
     fvec3 *__restrict__ conic_ptr    // (C, N, 3)
 ) {
     // Parallelize over C * N.
-    auto const idx = cg::this_grid().thread_rank();
+    auto const idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= C * N) {
         return;
     }
