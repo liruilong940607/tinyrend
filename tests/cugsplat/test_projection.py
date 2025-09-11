@@ -63,8 +63,8 @@ def test_projection_fused_ewa_3dgs_fwd(test_data: dict, benchmark: bool):
 
     Ks = test_data["Ks"]
     viewmats = test_data["viewmats"]
-    viewmats_R = viewmats[:, :3, :3]
-    viewmats_t = viewmats[:, :3, 3]
+    viewmats_R = viewmats[:, :3, :3].contiguous()
+    viewmats_t = viewmats[:, :3, 3].contiguous()
     resolution = (test_data["width"], test_data["height"])
     focal_length = (Ks[0, 0, 0].item(), Ks[0, 1, 1].item())
     principal_point = (Ks[0, 0, 2].item(), Ks[0, 1, 2].item())
