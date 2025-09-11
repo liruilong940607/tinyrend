@@ -98,4 +98,31 @@ projection_fused_ewa_3dgs_fwd(
     const at::Tensor scales     // [N, 3]
 );
 
+std::tuple<at::Tensor, at::Tensor, at::Tensor> projection_fused_ewa_3dgs_bwd(
+    // Perfect Pinhole Camera: All cameras share the same intrinsic.
+    const uint32_t image_width,
+    const uint32_t image_height,
+    const float principal_point_x,
+    const float principal_point_y,
+    const float focal_length_x,
+    const float focal_length_y,
+
+    const at::Tensor viewmat_R, // [C, 3, 3]
+    const at::Tensor viewmat_t, // [C, 3]
+
+    // Gaussians
+    const at::Tensor means,  // [N, 3]
+    const at::Tensor quats,  // [N, 4]
+    const at::Tensor scales, // [N, 3]
+
+    // Forward Outputs
+    const at::Tensor radii, // [C, N, 2]
+    const at::Tensor conic, // [C, N, 3]
+
+    // Gradient of Forward Outputs
+    const at::Tensor v_means2d, // [C, N, 2]
+    const at::Tensor v_depth,   // [C, N]
+    const at::Tensor v_conic    // [C, N, 3]
+);
+
 } // namespace cugsplat

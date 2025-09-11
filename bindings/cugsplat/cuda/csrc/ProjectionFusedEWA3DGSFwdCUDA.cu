@@ -61,11 +61,13 @@ __global__ void projection_fused_ewa_3dgs_fwd_kernel(
     }
 
     // Compute Gaussian covariance
-    auto const quat = quat_ptr[gid];
+    auto const quat_raw = quat_ptr[gid];
+    auto const quat = normalize(quat_raw);
     auto const scale = scale_ptr[gid];
     auto const R = mat3_cast(quat);
-    auto const RS =
-        R * fmat3(scale[0], 0.0f, 0.0f, 0.0f, scale[1], 0.0f, 0.0f, 0.0f, scale[2]);
+    auto const S =
+        fmat3(scale[0], 0.0f, 0.0f, 0.0f, scale[1], 0.0f, 0.0f, 0.0f, scale[2]);
+    auto const RS = R * S;
     auto const covar = RS * RS.transpose();
 
     // transform Gaussian covariance to camera space

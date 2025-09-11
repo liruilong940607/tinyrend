@@ -111,6 +111,19 @@ class _ProjectionFusedEWA3DGS(torch.autograd.Function):
             scales,
         )
 
+        ctx.save_for_backward(
+            viewmat_R,
+            viewmat_t,
+            means,
+            quats,
+            scales,
+            radii,
+            conic,
+        )
+        ctx.resolution = resolution
+        ctx.principal_point = principal_point
+        ctx.focal_length = focal_length
+
         return radii, means2d, depth, conic
 
     @staticmethod
@@ -127,21 +140,56 @@ class _ProjectionFusedEWA3DGS(torch.autograd.Function):
         v_depth = v_depth.contiguous()
         v_conic = v_conic.contiguous()
 
-        raise NotImplementedError("Backward pass is not implemented")
+        (
+            viewmat_R,
+            viewmat_t,
+            means,
+            quats,
+            scales,
+            radii,
+            conic,
+        ) = ctx.saved_tensors
+        resolution = ctx.resolution
+        principal_point = ctx.principal_point
+        focal_length = ctx.focal_length
+
+        (
+            v_means,
+            v_quats,
+            v_scales,
+        ) = _make_lazy_cuda_func("projection_fused_ewa_3dgs_bwd")(
+            resolution[0],  # image_width
+            resolution[1],  # image_height
+            principal_point[0],  # principal_point_x
+            principal_point[1],  # principal_point_y
+            focal_length[0],  # focal_length_x
+            focal_length[1],  # focal_length_y
+            viewmat_R,
+            viewmat_t,
+            # Gaussians
+            means,
+            quats,
+            scales,
+            # Forward Outputs
+            radii,
+            conic,
+            # Gradient of Forward Outputs
+            v_means2d,
+            v_depth,
+            v_conic,
+        )
 
         return (
-            v_means2d,  # v_means2d
-            v_conics,  # v_conics
-            v_colors,  # v_colors
-            v_opacities,  # v_opacities
-            None,  # v_width
-            None,  # v_height
-            None,  # v_tile_size
-            None,  # v_isect_offsets
-            None,  # v_flatten_ids
-            None,  # v_enable_fused_jvp
-            None,  # v_means2d_tangent
-            None,  # v_conics_tangent
-            None,  # v_colors_tangent
-            None,  # v_opacities_tangent
+            None,  # v_resolution
+            None,  # v_principal_point
+            None,  # v_focal_length
+            None,  # v_viewmat_R
+            None,  # v_viewmat_t
+            None,  # v_near_plane
+            None,  # v_far_plane
+            None,  # v_eps2d
+            None,  # v_opacities
+            v_means,  # v_means
+            v_quats,  # v_quats
+            v_scales,  # v_scales
         )

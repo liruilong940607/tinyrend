@@ -13,4 +13,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     );
 
     m.def("projection_fused_ewa_3dgs_fwd", &cugsplat::projection_fused_ewa_3dgs_fwd);
+    m.def("projection_fused_ewa_3dgs_bwd", &cugsplat::projection_fused_ewa_3dgs_bwd);
 }

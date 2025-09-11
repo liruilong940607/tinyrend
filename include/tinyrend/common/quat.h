@@ -167,7 +167,7 @@ inline TREND_HOST_DEVICE mat<T, 3, 3> mat3_cast(const quat<T> &q) {
 }
 
 template <typename T>
-inline TREND_HOST_DEVICE mat<T, 3, 3>
+inline TREND_HOST_DEVICE quat<T>
 mat3_cast_vjp(const quat<T> &q, const mat<T, 3, 3> &v_m) {
     return quat<T>(
         2.f * (q.x * (v_m[1][2] - v_m[2][1]) + q.y * (v_m[2][0] - v_m[0][2]) +

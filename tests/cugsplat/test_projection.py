@@ -58,6 +58,8 @@ def test_data():
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device")
 @pytest.mark.parametrize("benchmark", [False])
 def test_projection_fused_ewa_3dgs_fwd(test_data: dict, benchmark: bool):
+    torch.manual_seed(42)
+
     from gsplat.cuda._wrapper import (
         fully_fused_projection as fully_fused_projection_gsplat,
     )
@@ -127,34 +129,36 @@ def test_projection_fused_ewa_3dgs_fwd(test_data: dict, benchmark: bool):
     torch.testing.assert_close(depths[valid], depths_[valid], rtol=1e-4, atol=1e-4)
     torch.testing.assert_close(conics[valid], conics_[valid], rtol=1e-4, atol=1e-4)
 
-    # # backward
-    # v_render_colors = torch.rand_like(render_colors)
-    # v_render_alphas = torch.rand_like(render_alphas)
+    # backward
+    v_means2d = torch.rand_like(means2d)
+    v_depth = torch.rand_like(depths)
+    v_conic = torch.rand_like(conics)
 
-    # for _ in tqdm.trange(
-    #     5000 if benchmark else 1, desc="gsplat:backward", disable=not benchmark
-    # ):
-    #     v_means2d, v_conics, v_colors, v_opacities = torch.autograd.grad(
-    #         (render_colors * v_render_colors).sum()
-    #         + (render_alphas * v_render_alphas).sum(),
-    #         (means2d, conics, colors, opacities),
-    #         create_graph=True,
-    #     )
+    for _ in tqdm.trange(
+        50000 if benchmark else 1, desc="gsplat:backward", disable=not benchmark
+    ):
+        v_means, v_quats, v_scales = torch.autograd.grad(
+            (means2d * v_means2d).sum()
+            + (depths * v_depth).sum()
+            + (conics * v_conic).sum(),
+            (means, quats, scales),
+            create_graph=True,
+        )
 
-    # for _ in tqdm.trange(
-    #     5000 if benchmark else 1, desc="cugsplat:backward", disable=not benchmark
-    # ):
-    #     v_means2d_, v_conics_, v_colors_, v_opacities_ = torch.autograd.grad(
-    #         (render_output.colors * v_render_colors).sum()
-    #         + (render_output.alphas * v_render_alphas).sum(),
-    #         (means2d, conics, colors, opacities),
-    #         create_graph=True,
-    #     )
+    for _ in tqdm.trange(
+        50000 if benchmark else 1, desc="cugsplat:backward", disable=not benchmark
+    ):
+        v_means_, v_quats_, v_scales_ = torch.autograd.grad(
+            (means2d_ * v_means2d).sum()
+            + (depths_ * v_depth).sum()
+            + (conics_ * v_conic).sum(),
+            (means, quats, scales),
+            create_graph=True,
+        )
 
-    # torch.testing.assert_close(v_means2d, v_means2d_)
-    # torch.testing.assert_close(v_conics, v_conics_, rtol=1e-4, atol=1e-4)
-    # torch.testing.assert_close(v_colors, v_colors_)
-    # torch.testing.assert_close(v_opacities, v_opacities_)
+    torch.testing.assert_close(v_means, v_means_, rtol=1e-4, atol=1e-4)
+    torch.testing.assert_close(v_quats, v_quats_, rtol=3e-4, atol=3e-4)
+    torch.testing.assert_close(v_scales, v_scales_, rtol=6e-3, atol=6e-3)
 
 
 if __name__ == "__main__":
