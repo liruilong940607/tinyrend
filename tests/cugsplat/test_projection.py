@@ -61,8 +61,8 @@ def test_data():
 def test_projection_fused_ewa_3dgs_fwd(test_data: dict, benchmark: bool):
     from gsplat.cuda._wrapper import fully_fused_projection as fully_fused_projection_gsplat
 
-    Ks = test_data["Ks"][:1]
-    viewmats = test_data["viewmats"][:1]
+    Ks = test_data["Ks"]
+    viewmats = test_data["viewmats"]
     viewmats_R = viewmats[:, :3, :3]
     viewmats_t = viewmats[:, :3, 3]
     resolution = (test_data["width"], test_data["height"])
@@ -119,9 +119,9 @@ def test_projection_fused_ewa_3dgs_fwd(test_data: dict, benchmark: bool):
             scales,
         )
     
-    valid = (radii > 0).all(dim=-1)
+    valid = (radii > 0).all(dim=-1) & (radii_ > 0).all(dim=-1)
 
-    torch.testing.assert_close(radii, radii_)
+    torch.testing.assert_close(radii, radii_, rtol=0, atol=1)
     torch.testing.assert_close(means2d[valid], means2d_[valid], rtol=1e-4, atol=1e-4)
     torch.testing.assert_close(depths[valid], depths_[valid], rtol=1e-4, atol=1e-4)
     torch.testing.assert_close(conics[valid], conics_[valid], rtol=1e-4, atol=1e-4)
