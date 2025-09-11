@@ -11,4 +11,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         "image_gaussian_rasterize_backward",
         &cugsplat::image_gaussian_rasterize_backward
     );
+
+    m.def("projection_fused_ewa_3dgs_fwd", &cugsplat::projection_fused_ewa_3dgs_fwd);
 }
