@@ -50,7 +50,6 @@ def create_test_data():
     }
 
 
-
 @pytest.fixture
 def test_data():
     return create_test_data()
@@ -59,7 +58,9 @@ def test_data():
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="No CUDA device")
 @pytest.mark.parametrize("benchmark", [False])
 def test_projection_fused_ewa_3dgs_fwd(test_data: dict, benchmark: bool):
-    from gsplat.cuda._wrapper import fully_fused_projection as fully_fused_projection_gsplat
+    from gsplat.cuda._wrapper import (
+        fully_fused_projection as fully_fused_projection_gsplat,
+    )
 
     Ks = test_data["Ks"]
     viewmats = test_data["viewmats"]
@@ -93,8 +94,8 @@ def test_projection_fused_ewa_3dgs_fwd(test_data: dict, benchmark: bool):
             scales,
             viewmats,
             Ks,
-            resolution[0], # image_width
-            resolution[1], # image_height
+            resolution[0],  # image_width
+            resolution[1],  # image_height
             near_plane=near_plane,
             far_plane=far_plane,
             eps2d=eps2d,
@@ -118,7 +119,7 @@ def test_projection_fused_ewa_3dgs_fwd(test_data: dict, benchmark: bool):
             quats,
             scales,
         )
-    
+
     valid = (radii > 0).all(dim=-1) & (radii_ > 0).all(dim=-1)
 
     torch.testing.assert_close(radii, radii_, rtol=0, atol=1)
@@ -154,8 +155,6 @@ def test_projection_fused_ewa_3dgs_fwd(test_data: dict, benchmark: bool):
     # torch.testing.assert_close(v_conics, v_conics_, rtol=1e-4, atol=1e-4)
     # torch.testing.assert_close(v_colors, v_colors_)
     # torch.testing.assert_close(v_opacities, v_opacities_)
-
-
 
 
 if __name__ == "__main__":

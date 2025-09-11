@@ -10,25 +10,24 @@ from typing_extensions import Literal
 from .common import has_tangent, _make_lazy_cuda_func
 
 
-ProjectionFusedEWA3DGSOutput = namedtuple("ProjectionFusedEWA3DGSOutput", ["radii", "means2d", "depth", "conic"])
+ProjectionFusedEWA3DGSOutput = namedtuple(
+    "ProjectionFusedEWA3DGSOutput", ["radii", "means2d", "depth", "conic"]
+)
 
 
 def projection_fused_ewa_3dgs(
     resolution: Tuple[int, int],
     principal_point: Tuple[float, float],
     focal_length: Tuple[float, float],
-
     viewmat_R: Tensor,  # [C, 3, 3]
     viewmat_t: Tensor,  # [C, 3]
-
     near_plane: float,
     far_plane: float,
     eps2d: float,
-
     opacities: Tensor,  # [N]
-    means: Tensor,     # [N, 3]
-    quats: Tensor,     # [N, 4]
-    scales: Tensor,    # [N, 3]
+    means: Tensor,  # [N, 3]
+    quats: Tensor,  # [N, 4]
+    scales: Tensor,  # [N, 3]
 ) -> ProjectionFusedEWA3DGSOutput:
     """Projection fused EWA 3DGS"""
     radii, means2d, depth, conic = _ProjectionFusedEWA3DGS.apply(
@@ -45,7 +44,9 @@ def projection_fused_ewa_3dgs(
         quats,
         scales,
     )
-    return ProjectionFusedEWA3DGSOutput(radii=radii, means2d=means2d, depth=depth, conic=conic)
+    return ProjectionFusedEWA3DGSOutput(
+        radii=radii, means2d=means2d, depth=depth, conic=conic
+    )
 
 
 class _ProjectionFusedEWA3DGS(torch.autograd.Function):
@@ -57,18 +58,15 @@ class _ProjectionFusedEWA3DGS(torch.autograd.Function):
         resolution: Tuple[int, int],
         principal_point: Tuple[float, float],
         focal_length: Tuple[float, float],
-
         viewmat_R: Tensor,  # [C, 3, 3]
         viewmat_t: Tensor,  # [C, 3]
-
         near_plane: float,
         far_plane: float,
         eps2d: float,
-
         opacities: Tensor,  # [N]
-        means: Tensor,     # [N, 3]
-        quats: Tensor,     # [N, 4]
-        scales: Tensor,    # [N, 3]
+        means: Tensor,  # [N, 3]
+        quats: Tensor,  # [N, 4]
+        scales: Tensor,  # [N, 3]
     ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         N = means.size(0)
         C = viewmat_R.size(0)
@@ -96,20 +94,17 @@ class _ProjectionFusedEWA3DGS(torch.autograd.Function):
 
         radii, means2d, depth, conic = _make_lazy_cuda_func(kernel_name)(
             # Perfect Pinhole Camera: All cameras share the same intrinsic.
-            resolution[0], # image_width
-            resolution[1], # image_height
-            principal_point[0], # principal_point_x
-            principal_point[1], # principal_point_y
-            focal_length[0], # focal_length_x
-            focal_length[1], # focal_length_y
-
+            resolution[0],  # image_width
+            resolution[1],  # image_height
+            principal_point[0],  # principal_point_x
+            principal_point[1],  # principal_point_y
+            focal_length[0],  # focal_length_x
+            focal_length[1],  # focal_length_y
             viewmat_R,
             viewmat_t,
-
             near_plane,
             far_plane,
             eps2d,
-
             opacities,
             means,
             quats,
